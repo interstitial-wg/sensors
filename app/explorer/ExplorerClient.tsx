@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import FilterPanel from "@/components/FilterPanel";
 import SensorMap from "@/components/SensorMap";
-import { getSensors, getSensorTypes } from "@/lib/sensors-api";
+import { getSensors, getSensorTypes, getSensor } from "@/lib/sensors-api";
 import {
   boundsContained,
   boundsToFetchSegments,
@@ -49,6 +49,7 @@ async function runWithConcurrency<T>(
 export default function ExplorerClient() {
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get("q")?.trim() ?? "";
+  const focusSensorIdParam = searchParams.get("sensor")?.trim() ?? null;
   const [sensorTypes, setSensorTypes] = useState<string[]>([]);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [allSensors, setAllSensors] = useState<Sensor[]>([]);
@@ -62,6 +63,7 @@ export default function ExplorerClient() {
     null,
   );
   const [fitToSensorsTrigger, setFitToSensorsTrigger] = useState(0);
+  const [focusSensor, setFocusSensor] = useState<Sensor | null>(null);
   const [progressiveVisibleCount, setProgressiveVisibleCount] = useState(0);
   const boundsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBoundsKeyRef = useRef<string | null>(null);
@@ -70,6 +72,26 @@ export default function ExplorerClient() {
   const lastSelectedTypesKeyRef = useRef<string>("");
   const bboxCacheRef = useRef<Map<string, Sensor[]>>(new Map());
   const fetchIdRef = useRef(0);
+
+  // Fetch focus sensor when ?sensor=id is in URL (e.g. from DotGrid "View sensor" link)
+  useEffect(() => {
+    if (!focusSensorIdParam) {
+      setFocusSensor(null);
+      return;
+    }
+    let cancelled = false;
+    getSensor(focusSensorIdParam)
+      .then((s) => {
+        if (!cancelled && s) setFocusSensor(s);
+        else if (!cancelled) setFocusSensor(null);
+      })
+      .catch(() => {
+        if (!cancelled) setFocusSensor(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusSensorIdParam]);
 
   useEffect(() => {
     let cancelled = false;
@@ -318,8 +340,17 @@ export default function ExplorerClient() {
     return allSensors.filter((s) => selectedTypes.has(s.sensor_type));
   }, [allSensors, selectedTypes]);
 
-  // Show all filtered sensors on the globe (no viewport filter) so markers are always visible
-  const sensorsToShow = filteredByType;
+  // Show all filtered sensors on the globe; include focus sensor from ?sensor=id if not already in list
+  const sensorsToShow = useMemo(() => {
+    if (
+      !focusSensor ||
+      focusSensor.latitude == null ||
+      focusSensor.longitude == null
+    )
+      return filteredByType;
+    const hasFocus = filteredByType.some((s) => s.id === focusSensor.id);
+    return hasFocus ? filteredByType : [focusSensor, ...filteredByType];
+  }, [filteredByType, focusSensor]);
 
   // Progressive display: reveal sensors center-out in chunks (data is already sorted by distance from center)
   const displaySensors = useMemo(
@@ -354,6 +385,7 @@ export default function ExplorerClient() {
           sensors={sensorsToShow}
           onBoundsChange={handleBoundsChange}
           fitToSensorsTrigger={fitToSensorsTrigger}
+          focusSensorId={focusSensor?.id ?? null}
         />
       </div>
       <div className="absolute inset-x-0 bottom-0 z-10 border-t border-zinc-200/60 bg-white/90 backdrop-blur-sm dark:border-zinc-700/50 dark:bg-zinc-900/90">

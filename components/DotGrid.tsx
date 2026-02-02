@@ -7,6 +7,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { getSensors, getLatestReading } from "@/lib/sensors-api";
 import type { Sensor } from "@/lib/types";
 import type { LatestReadingResponse } from "@/lib/sensors-api";
@@ -69,76 +70,6 @@ interface DotGridProps {
   /** Fill container - compute rows/cols from available space (overrides rows/cols) */
   fill?: boolean;
 }
-
-/** Predefined abstract patterns: arrays of [row, col, state] */
-const DEFAULT_PATTERNS: [number, number, DotState][] = [
-  // Light green highlight (design: upper-left)
-  [2, 3, "green"],
-  // Left column - vertical cluster
-  [3, 3, "solid"],
-  [3, 3, "solid"],
-  [4, 3, "solid"],
-  [5, 3, "hollow"],
-  [6, 3, "solid"],
-  [7, 3, "solid"],
-  [8, 3, "hollow"],
-  [9, 3, "solid"],
-  // Second cluster - denser blob
-  [2, 8, "solid"],
-  [3, 7, "solid"],
-  [3, 8, "solid"],
-  [3, 9, "hollow"],
-  [4, 7, "solid"],
-  [4, 8, "solid"],
-  [4, 9, "solid"],
-  [5, 7, "solid"],
-  [5, 8, "hollow"],
-  [5, 9, "solid"],
-  [6, 8, "solid"],
-  [7, 8, "solid"],
-  [8, 8, "hollow"],
-  // Third column
-  [2, 14, "hollow"],
-  [3, 14, "solid"],
-  [4, 14, "solid"],
-  [5, 14, "solid"],
-  [6, 14, "solid"],
-  [7, 14, "solid"],
-  [8, 14, "hollow"],
-  [9, 14, "solid"],
-  // Right cluster - complex shape
-  [1, 22, "solid"],
-  [2, 21, "solid"],
-  [2, 22, "solid"],
-  [2, 23, "hollow"],
-  [3, 20, "solid"],
-  [3, 21, "solid"],
-  [3, 22, "solid"],
-  [3, 23, "solid"],
-  [4, 20, "solid"],
-  [4, 21, "hollow"],
-  [4, 22, "solid"],
-  [4, 23, "solid"],
-  [5, 21, "solid"],
-  [5, 22, "solid"],
-  [5, 23, "solid"],
-  [6, 22, "solid"],
-  [6, 23, "hollow"],
-  [7, 22, "solid"],
-  [8, 22, "solid"],
-  [9, 22, "solid"],
-  [9, 23, "hollow"],
-  // Sparse highlights
-  [0, 5, "solid"],
-  [1, 12, "hollow"],
-  [4, 4, "solid"],
-  [6, 16, "solid"],
-  [3, 18, "hollow"],
-];
-
-/** Pattern source bounds - spread these across the full grid */
-const PATTERN_ROWS = 10;
-const PATTERN_COLS = 24;
 
 /** Memoized dot - only re-renders when its props change (e.g. isHovered, isClicked) */
 const Dot = React.memo(function Dot({
@@ -211,17 +142,11 @@ const Dot = React.memo(function Dot({
 });
 
 function buildPatternMap(
-  rows: number,
-  cols: number,
+  _rows: number,
+  _cols: number,
   custom?: Record<string, DotState>,
 ): Record<string, DotState> {
-  const map: Record<string, DotState> = { ...custom };
-  for (const [pr, pc, state] of DEFAULT_PATTERNS) {
-    const r = Math.round((pr / (PATTERN_ROWS - 1)) * Math.max(0, rows - 1));
-    const c = Math.round((pc / (PATTERN_COLS - 1)) * Math.max(0, cols - 1));
-    map[`${r},${c}`] = state;
-  }
-  return map;
+  return { ...custom };
 }
 
 export default function DotGrid({
@@ -471,29 +396,37 @@ export default function DotGrid({
             {grid}
             {showTooltip && tooltipAnchor && (
               <div
-                className="dot-grid-tooltip-pill pointer-events-none fixed z-50"
+                className="dot-grid-tooltip-pill fixed z-50 flex flex-col gap-1.5"
                 style={{
                   left: tooltipAnchor.x,
                   top: tooltipAnchor.y,
                 }}
               >
-                {readingLoading ? (
-                  <span className="dot-grid-tooltip-content">Loading…</span>
-                ) : reading && clickedDot ? (
-                  <div className="dot-grid-tooltip-content flex flex-wrap gap-x-2 gap-y-1">
-                    {Object.entries(reading.reading.measurements).map(
-                      ([key, value]) => (
-                        <span key={key}>
-                          {formatKey(key)}: {formatValue(value)}
-                        </span>
-                      ),
-                    )}
-                  </div>
-                ) : (
-                  <span className="dot-grid-tooltip-content">
-                    {activeSensor.name}
-                  </span>
-                )}
+                <div className="pointer-events-none">
+                  {readingLoading ? (
+                    <span className="dot-grid-tooltip-content">Loading…</span>
+                  ) : reading && clickedDot ? (
+                    <div className="dot-grid-tooltip-content flex flex-wrap gap-x-2 gap-y-1">
+                      {Object.entries(reading.reading.measurements).map(
+                        ([key, value]) => (
+                          <span key={key}>
+                            {formatKey(key)}: {formatValue(value)}
+                          </span>
+                        ),
+                      )}
+                    </div>
+                  ) : (
+                    <span className="dot-grid-tooltip-content">
+                      {activeSensor.name}
+                    </span>
+                  )}
+                </div>
+                <Link
+                  href={`/explorer?sensor=${encodeURIComponent(activeSensor.id)}`}
+                  className="dot-grid-tooltip-content pointer-events-auto text-emerald-400 underline-offset-2 hover:text-emerald-300 hover:underline"
+                >
+                  View sensor →
+                </Link>
               </div>
             )}
           </>

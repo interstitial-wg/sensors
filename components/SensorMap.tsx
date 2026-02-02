@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Map, { Layer, NavigationControl, Popup, Source } from "react-map-gl/maplibre";
+import Map, {
+  Layer,
+  NavigationControl,
+  Popup,
+  Source,
+} from "react-map-gl/maplibre";
 import type { MapRef } from "react-map-gl/maplibre";
 import type { FeatureCollection } from "geojson";
 import type { Sensor } from "@/lib/types";
@@ -65,14 +70,18 @@ export interface SensorMapProps {
   onBoundsChange?: (bounds: Bounds) => void;
   /** Increment to trigger fitBounds to all sensors with coords. */
   fitToSensorsTrigger?: number;
+  /** When set, fit map to this sensor and show its popup. Sensor must be in sensors array. */
+  focusSensorId?: string | null;
 }
 
 export default function SensorMap({
   sensors,
   onBoundsChange,
   fitToSensorsTrigger = 0,
+  focusSensorId = null,
 }: SensorMapProps) {
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
+  const hasFocusedRef = useRef(false);
   const [hoveredSensor, setHoveredSensor] = useState<Sensor | null>(null);
   const mapRef = useRef<MapRef | null>(null);
 
@@ -80,9 +89,9 @@ export default function SensorMap({
     () =>
       sensors.filter(
         (s): s is Sensor & { latitude: number; longitude: number } =>
-          s.latitude != null && s.longitude != null
+          s.latitude != null && s.longitude != null,
       ),
-    [sensors]
+    [sensors],
   );
 
   const geojson = useMemo<FeatureCollection>(() => {
@@ -134,7 +143,7 @@ export default function SensorMap({
         north: b.getNorth(),
       });
     },
-    [onBoundsChange]
+    [onBoundsChange],
   );
 
   const handleMoveEnd = useCallback(() => {
@@ -169,11 +178,14 @@ export default function SensorMap({
       setSelectedSensor(sensor);
       setHoveredSensor(sensor);
     },
-    [sensorsById]
+    [sensorsById],
   );
 
   const handleMouseMove = useCallback(
-    (evt: { point: { x: number; y: number }; features?: { properties?: { id?: string } }[] }) => {
+    (evt: {
+      point: { x: number; y: number };
+      features?: { properties?: { id?: string } }[];
+    }) => {
       const features = evt.features;
       if (!features?.length) return;
       const feature = features[0];
@@ -182,7 +194,7 @@ export default function SensorMap({
       const sensor = sensorsById[id] ?? null;
       setHoveredSensor(sensor);
     },
-    [sensorsById]
+    [sensorsById],
   );
 
   // Fit map to all sensors when parent triggers (e.g. "Fit map to all sensors" button)
@@ -201,9 +213,29 @@ export default function SensorMap({
         [west, south],
         [east, north],
       ],
-      { padding: 48, maxZoom: 12, duration: 800 }
+      { padding: 48, maxZoom: 12, duration: 800 },
     );
   }, [fitToSensorsTrigger, withCoords]);
+
+  // Fit map to and select a specific sensor (e.g. from ?sensor=id in URL)
+  useEffect(() => {
+    if (!focusSensorId || hasFocusedRef.current) return;
+    const sensor = sensorsById[focusSensorId];
+    if (!sensor?.latitude || !sensor?.longitude) return;
+    const map = mapRef.current?.getMap();
+    if (!map || typeof map.fitBounds !== "function") return;
+    hasFocusedRef.current = true;
+    const pad = 0.02;
+    map.fitBounds(
+      [
+        [sensor.longitude - pad, sensor.latitude - pad],
+        [sensor.longitude + pad, sensor.latitude + pad],
+      ],
+      { padding: 48, maxZoom: 14, duration: 800 },
+    );
+    setSelectedSensor(sensor);
+    setHoveredSensor(sensor);
+  }, [focusSensorId, sensorsById]);
 
   return (
     <div className="sensor-map-minimal relative h-full w-full">
@@ -225,7 +257,11 @@ export default function SensorMap({
         onMouseMove={handleMouseMove}
         interactiveLayerIds={[SENSORS_LAYER_ID]}
       >
-        <NavigationControl position="top-right" showCompass={true} showZoom={true} />
+        <NavigationControl
+          position="top-right"
+          showCompass={true}
+          showZoom={true}
+        />
         <Source id={SENSORS_SOURCE_ID} type="geojson" data={geojson}>
           <Layer
             id={SENSORS_LAYER_ID}

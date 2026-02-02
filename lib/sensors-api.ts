@@ -194,6 +194,26 @@ async function fetchApiSensors(
 }
 
 /**
+ * Fetch a single sensor by ID. GET /api/v1/sensors/:id.
+ * Returns null when not found (404).
+ */
+export async function getSensor(id: string): Promise<Sensor | null> {
+  if (USE_PLACEHOLDER) {
+    const sensor = PLACEHOLDER_SENSORS.find((s) => s.id === id);
+    return sensor ?? null;
+  }
+  const url = `${API_BASE}/api/v1/sensors/${encodeURIComponent(id)}`;
+  const res = await fetch(url, {
+    headers: { "x-api-key": getApiKey() },
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Sensors API error: ${res.status}`);
+  const raw = (await res.json()) as Record<string, unknown>;
+  return normalizeSensor(raw);
+}
+
+/**
  * Latest reading from GET /api/v1/sensors/:id/readings/latest.
  * Returns null when sensor has no feed or no readings (404).
  */

@@ -67,7 +67,7 @@ export default function Home() {
 
           {/* Right 50%: dot grid with footer inside */}
           <div className="flex h-full w-1/2 flex-col overflow-hidden bg-[#1a1a1a]">
-            <div className="flex min-h-0 flex-1 flex-col px-6 pt-6">
+            <div className="flex min-h-0 flex-1 flex-col pl-6 pr-3 pt-6">
               <div className="min-h-0 flex-1">
                 <DotGrid fill className="h-full opacity-90" twinkle />
               </div>
