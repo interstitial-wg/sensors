@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono, JetBrains_Mono, Noto_Sans } from "next/font/google";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
+import { UmamiAnalytics } from "@/components/UmamiAnalytics";
 
 const notoSans = Noto_Sans({
   variable: "--font-noto-sans",
@@ -38,6 +39,7 @@ export default async function RootLayout({
         className={`${notoSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} antialiased`}
       >
         {children}
+        <UmamiAnalytics />
       </body>
     </html>
   );

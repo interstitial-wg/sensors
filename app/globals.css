@@ -7,7 +7,8 @@
   /* Our colors palette */
   --color-sage: #a0c4a0;
   --color-cream: #f5e8d8;
-  --color-orange: #f08040;
+  --color-orange: #fd581e;
+  --color-orange-alt: #f08040;
   --color-gold: #f8c820;
   --color-lavender: #d0c8e8;
   --color-navy: #203870;
@@ -155,12 +156,12 @@ body {
 }
 
 .dot-grid-status.loading {
-  color: var(--color-gold);
+  color: var(--color-orange);
   font-weight: 600;
 }
 
 .dot-grid-status.live {
-  color: var(--color-sage);
+  color: #9ab07f;
 }
 
 /* Dot grid sensor tooltip - glass pill near cursor */

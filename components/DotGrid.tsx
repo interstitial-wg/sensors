@@ -25,10 +25,14 @@ function shuffle<T>(arr: T[]): T[] {
   return out;
 }
 
-/** Dot states: base (subtle), solid (filled white), hollow (outlined white) */
-type DotState = "base" | "solid" | "hollow";
+/** Dot states: base (subtle), solid (filled white), hollow (outlined white), green */
+type DotState = "base" | "solid" | "hollow" | "green";
 
-const CELL_SIZE = 24; // 6px dot + 18px gap (fewer dots = faster)
+const DOT_SIZE = 24;
+const GAP = 12; // padding between dots
+const CELL_SIZE = DOT_SIZE + GAP; // 36px per cell
+const MAX_ROWS = 40;
+const MAX_COLS = 32;
 
 /** Format measurement key for display */
 function formatKey(key: string): string {
@@ -68,8 +72,10 @@ interface DotGridProps {
 
 /** Predefined abstract patterns: arrays of [row, col, state] */
 const DEFAULT_PATTERNS: [number, number, DotState][] = [
+  // Light green highlight (design: upper-left)
+  [2, 3, "green"],
   // Left column - vertical cluster
-  [2, 3, "solid"],
+  [3, 3, "solid"],
   [3, 3, "solid"],
   [4, 3, "solid"],
   [5, 3, "hollow"],
@@ -163,6 +169,16 @@ const Dot = React.memo(function Dot({
   const twinkleDelay = twinkle ? ((r * 7 + c * 11) % 20) / 10 : 0;
   const showOutline = !isClicked && state === "hollow";
 
+  const bgColor = isClicked
+    ? "#ffffff"
+    : state === "base"
+      ? "rgba(80, 80, 80, 0.6)"
+      : state === "solid"
+        ? "#ffffff"
+        : state === "green"
+          ? "#a0c4a0"
+          : "transparent";
+
   return (
     <div
       data-row={r}
@@ -173,13 +189,7 @@ const Dot = React.memo(function Dot({
       style={{
         width: dotSize,
         height: dotSize,
-        backgroundColor: isClicked
-          ? "#ffffff"
-          : state === "base"
-            ? "rgba(80, 80, 80, 0.6)"
-            : state === "solid"
-              ? "#ffffff"
-              : "transparent",
+        backgroundColor: bgColor,
         border: showOutline ? "1.5px solid rgba(255, 255, 255, 0.9)" : "none",
         boxSizing: "border-box",
         animationDelay:
@@ -237,8 +247,8 @@ export default function DotGrid({
       const w = el.clientWidth;
       const h = el.clientHeight;
       setDimensions({
-        cols: Math.max(1, Math.floor(w / CELL_SIZE)),
-        rows: Math.max(1, Math.floor(h / CELL_SIZE)),
+        cols: Math.min(MAX_COLS, Math.max(1, Math.floor(w / CELL_SIZE))),
+        rows: Math.min(MAX_ROWS, Math.max(1, Math.floor(h / CELL_SIZE))),
       });
     };
     update();
@@ -249,7 +259,7 @@ export default function DotGrid({
 
   const rows = dimensions?.rows ?? rowsProp;
   const cols = dimensions?.cols ?? colsProp;
-  const patternMap = twinkle ? {} : buildPatternMap(rows, cols, customPattern);
+  const patternMap = buildPatternMap(rows, cols, customPattern);
   const total = rows * cols;
 
   const loadOrderMap = useMemo(() => {
@@ -262,20 +272,6 @@ export default function DotGrid({
     });
     return order;
   }, [twinkle, total]);
-
-  const loadingDurationMs = useMemo(() => {
-    if (!twinkle || total === 0) return 0;
-    const maxBatchIndex = Math.floor((total - 1) / BATCH_SIZE);
-    const maxRevealDelay = maxBatchIndex * BATCH_INTERVAL_S;
-    return (maxRevealDelay + REVEAL_DURATION_S + 0.3) * 1000;
-  }, [twinkle, total]);
-
-  const [isLive, setIsLive] = useState(false);
-  useEffect(() => {
-    if (!twinkle || loadingDurationMs === 0) return;
-    const t = setTimeout(() => setIsLive(true), loadingDurationMs);
-    return () => clearTimeout(t);
-  }, [twinkle, loadingDurationMs]);
 
   // Fetch sensors for dot-sensor mapping (when fill + twinkle)
   const [sensors, setSensors] = useState<Sensor[]>([]);
@@ -422,8 +418,6 @@ export default function DotGrid({
     [getSensorForDot, clickedDot],
   );
 
-  const DOT_SIZE = 6;
-  const GAP = CELL_SIZE - DOT_SIZE;
   const grid = (
     <div
       ref={gridRef}
@@ -475,19 +469,6 @@ export default function DotGrid({
         {dimensions && (
           <>
             {grid}
-            {twinkle && (
-              <div
-                className="absolute bottom-0 right-0 p-3"
-                aria-live="polite"
-                aria-atomic
-              >
-                <span
-                  className={`dot-grid-status-pill dot-grid-status ${isLive ? "live" : "loading"}`}
-                >
-                  {isLive ? "Live" : "Loading"}
-                </span>
-              </div>
-            )}
             {showTooltip && tooltipAnchor && (
               <div
                 className="dot-grid-tooltip-pill pointer-events-none fixed z-50"
