@@ -273,6 +273,20 @@ export default function SensorMap({
               "circle-stroke-color": "rgba(255,255,255,0.9)",
             }}
           />
+          {/* Highlighted dot for selected/focused sensor - makes location obvious */}
+          {selectedSensor && (
+            <Layer
+              id="sensors-selected-highlight"
+              type="circle"
+              filter={["==", ["get", "id"], selectedSensor.id]}
+              paint={{
+                "circle-radius": 10,
+                "circle-color": "#22c55e",
+                "circle-stroke-width": 3,
+                "circle-stroke-color": "#ffffff",
+              }}
+            />
+          )}
         </Source>
         {selectedSensor &&
           selectedSensor.latitude != null &&

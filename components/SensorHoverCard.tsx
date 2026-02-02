@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getLatestReading, type LatestReadingResponse } from "@/lib/sensors-api";
+import {
+  getLatestReading,
+  type LatestReadingResponse,
+} from "@/lib/sensors-api";
 import type { Sensor } from "@/lib/types";
 
 /** Format measurement key for display (e.g. pm2_5_ug_per_m3 → PM2.5) */
@@ -114,7 +117,10 @@ export default function SensorHoverCard({
       {lastReadingTimestamp ? (
         <>
           <span>{formatTimestamp(lastReadingTimestamp)}</span>
-          <span className="size-2 animate-pulse rounded-full bg-amber-500" aria-hidden />
+          <span
+            className="size-2 animate-pulse rounded-full bg-amber-500"
+            aria-hidden
+          />
         </>
       ) : (
         <span className="inline-flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
@@ -169,6 +175,24 @@ export default function SensorHoverCard({
                   {formatMeasurementKey(key)}: {formatMeasurementValue(value)}
                 </span>
               ))}
+            </div>
+          </div>
+        )}
+        {(sensor.provider_name ||
+          sensor.feed_name ||
+          sensor.connected_service) && (
+          <div>
+            <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              Data source
+            </div>
+            <div className="mt-0.5 truncate text-xs text-zinc-600 dark:text-zinc-300">
+              {[
+                sensor.provider_name,
+                sensor.feed_name,
+                sensor.connected_service,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </div>
           </div>
         )}
