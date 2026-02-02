@@ -3,12 +3,24 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Our colors palette */
+  --color-sage: #a0c4a0;
+  --color-cream: #f5e8d8;
+  --color-orange: #f08040;
+  --color-gold: #f8c820;
+  --color-lavender: #d0c8e8;
+  --color-navy: #203870;
+  --color-teal: #107050;
+  --color-metric-green: #007250;
+  --color-periwinkle: #d8e0f0;
+  --color-coral: #f06030;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-noto-sans);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -22,5 +34,149 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Minimal map UI: compact controls and popup */
+.sensor-map-minimal .maplibregl-ctrl-group {
+  border: none;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.sensor-map-minimal .maplibregl-ctrl-group button {
+  width: 28px;
+  height: 28px;
+}
+.sensor-map-minimal .maplibregl-ctrl-attrib {
+  font-size: 10px;
+  opacity: 0.7;
+}
+.sensor-map-minimal .maplibregl-popup-content {
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.sensor-map-minimal .maplibregl-popup-close-button {
+  font-size: 18px;
+  padding: 2px 6px;
+}
+
+/* Dot grid: reveal from background, then twinkle */
+@keyframes dot-reveal {
+  0% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.animate-dot-reveal-twinkle {
+  animation:
+    dot-reveal 1s ease-out both,
+    twinkle 2.5s ease-in-out 1s infinite;
+}
+
+/* Hovered dot: no twinkle, stays fully visible */
+.dot-no-twinkle {
+  animation: none;
+  opacity: 1;
+}
+
+/* Instant hover feedback - bypasses React for responsiveness */
+.dot-cell:hover:not(.dot-clicked) {
+  border: 1.5px solid rgba(255, 255, 255, 0.9) !important;
+  animation: none !important;
+  opacity: 1 !important;
+}
+
+/* Neighbor-of-hovered: subtle highlight for "data field" feel */
+.dot-cell.dot-neighbor {
+  background-color: rgba(110, 110, 110, 0.8) !important;
+}
+
+/* Grid: touch-action removes 300ms tap delay on mobile for instant response */
+.dot-grid-container {
+  touch-action: manipulation;
+}
+
+/* Spinning globe logo */
+@keyframes globe-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-globe-spin {
+  display: inline-block;
+  animation: globe-spin 4s linear infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-globe-spin {
+    animation: none;
+  }
+}
+
+/* Dot grid status overlay - pill with glass background */
+.dot-grid-status-pill {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.375rem;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: color 0.3s ease;
+}
+
+.dot-grid-status {
+  font-family:
+    "Berkeley Mono", var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.dot-grid-status.loading {
+  color: var(--color-gold);
+  font-weight: 600;
+}
+
+.dot-grid-status.live {
+  color: var(--color-sage);
+}
+
+/* Dot grid sensor tooltip - glass pill near cursor */
+.dot-grid-tooltip-pill {
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.375rem;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-width: 280px;
+}
+
+.dot-grid-tooltip-content {
+  font-family:
+    "Berkeley Mono", var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.95);
 }

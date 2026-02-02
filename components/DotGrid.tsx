@@ -1,0 +1,525 @@
+"use client";
+
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { getSensors, getLatestReading } from "@/lib/sensors-api";
+import type { Sensor } from "@/lib/types";
+import type { LatestReadingResponse } from "@/lib/sensors-api";
+
+const BATCH_SIZE = 80;
+const BATCH_INTERVAL_S = 0.05;
+const REVEAL_DURATION_S = 1;
+
+/** Fisher-Yates shuffle - returns new shuffled array */
+function shuffle<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Dot states: base (subtle), solid (filled white), hollow (outlined white) */
+type DotState = "base" | "solid" | "hollow";
+
+const CELL_SIZE = 24; // 6px dot + 18px gap (fewer dots = faster)
+
+/** Format measurement key for display */
+function formatKey(key: string): string {
+  const known: Record<string, string> = {
+    pm2_5_ug_per_m3: "PM2.5",
+    pm10_ug_per_m3: "PM10",
+    air_temperature_c: "Temp",
+    relative_humidity_percent: "Humidity",
+    wind_speed_mps: "Wind",
+    water_temperature_c: "Water temp",
+    wave_height_m: "Wave ht",
+    dissolved_oxygen_mg_per_l: "DO",
+    turbidity_ntu: "Turbidity",
+    aqi: "AQI",
+  };
+  return known[key] ?? key.replace(/_/g, " ");
+}
+
+function formatValue(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "number")
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return String(value);
+}
+
+interface DotGridProps {
+  rows?: number;
+  cols?: number;
+  /** Map of "row,col" -> state. Unset cells use "base". */
+  pattern?: Record<string, DotState>;
+  className?: string;
+  /** Enable twinkle animation on dots */
+  twinkle?: boolean;
+  /** Fill container - compute rows/cols from available space (overrides rows/cols) */
+  fill?: boolean;
+}
+
+/** Predefined abstract patterns: arrays of [row, col, state] */
+const DEFAULT_PATTERNS: [number, number, DotState][] = [
+  // Left column - vertical cluster
+  [2, 3, "solid"],
+  [3, 3, "solid"],
+  [4, 3, "solid"],
+  [5, 3, "hollow"],
+  [6, 3, "solid"],
+  [7, 3, "solid"],
+  [8, 3, "hollow"],
+  [9, 3, "solid"],
+  // Second cluster - denser blob
+  [2, 8, "solid"],
+  [3, 7, "solid"],
+  [3, 8, "solid"],
+  [3, 9, "hollow"],
+  [4, 7, "solid"],
+  [4, 8, "solid"],
+  [4, 9, "solid"],
+  [5, 7, "solid"],
+  [5, 8, "hollow"],
+  [5, 9, "solid"],
+  [6, 8, "solid"],
+  [7, 8, "solid"],
+  [8, 8, "hollow"],
+  // Third column
+  [2, 14, "hollow"],
+  [3, 14, "solid"],
+  [4, 14, "solid"],
+  [5, 14, "solid"],
+  [6, 14, "solid"],
+  [7, 14, "solid"],
+  [8, 14, "hollow"],
+  [9, 14, "solid"],
+  // Right cluster - complex shape
+  [1, 22, "solid"],
+  [2, 21, "solid"],
+  [2, 22, "solid"],
+  [2, 23, "hollow"],
+  [3, 20, "solid"],
+  [3, 21, "solid"],
+  [3, 22, "solid"],
+  [3, 23, "solid"],
+  [4, 20, "solid"],
+  [4, 21, "hollow"],
+  [4, 22, "solid"],
+  [4, 23, "solid"],
+  [5, 21, "solid"],
+  [5, 22, "solid"],
+  [5, 23, "solid"],
+  [6, 22, "solid"],
+  [6, 23, "hollow"],
+  [7, 22, "solid"],
+  [8, 22, "solid"],
+  [9, 22, "solid"],
+  [9, 23, "hollow"],
+  // Sparse highlights
+  [0, 5, "solid"],
+  [1, 12, "hollow"],
+  [4, 4, "solid"],
+  [6, 16, "solid"],
+  [3, 18, "hollow"],
+];
+
+/** Pattern source bounds - spread these across the full grid */
+const PATTERN_ROWS = 10;
+const PATTERN_COLS = 24;
+
+/** Memoized dot - only re-renders when its props change (e.g. isHovered, isClicked) */
+const Dot = React.memo(function Dot({
+  r,
+  c,
+  state,
+  isHovered,
+  isClicked,
+  twinkle,
+  fill,
+  batchPosition,
+  dotSize,
+  onDotClick,
+}: {
+  r: number;
+  c: number;
+  state: DotState;
+  isHovered: boolean;
+  isClicked: boolean;
+  twinkle: boolean;
+  fill: boolean;
+  batchPosition: number;
+  dotSize: number;
+  onDotClick: (r: number, c: number, e: React.MouseEvent) => void;
+}) {
+  const batchIndex = Math.floor(batchPosition / BATCH_SIZE);
+  const revealDelay = twinkle ? batchIndex * BATCH_INTERVAL_S : 0;
+  const twinkleDelay = twinkle ? ((r * 7 + c * 11) % 20) / 10 : 0;
+  const showOutline = !isClicked && state === "hollow";
+
+  return (
+    <div
+      data-row={r}
+      data-col={c}
+      role={twinkle && fill ? "button" : undefined}
+      tabIndex={twinkle && fill ? 0 : undefined}
+      className={`dot-cell rounded-full ${twinkle && !isHovered && !isClicked ? "animate-dot-reveal-twinkle" : ""} ${twinkle && (isHovered || isClicked) ? "dot-no-twinkle" : ""} ${twinkle && fill ? "cursor-pointer" : ""} ${isClicked ? "dot-clicked" : ""}`}
+      style={{
+        width: dotSize,
+        height: dotSize,
+        backgroundColor: isClicked
+          ? "#ffffff"
+          : state === "base"
+            ? "rgba(80, 80, 80, 0.6)"
+            : state === "solid"
+              ? "#ffffff"
+              : "transparent",
+        border: showOutline ? "1.5px solid rgba(255, 255, 255, 0.9)" : "none",
+        boxSizing: "border-box",
+        animationDelay:
+          twinkle && !isHovered && !isClicked
+            ? `${revealDelay}s, ${1 + revealDelay + twinkleDelay}s`
+            : undefined,
+      }}
+      onClick={
+        twinkle && fill
+          ? (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDotClick(r, c, e);
+            }
+          : undefined
+      }
+    />
+  );
+});
+
+function buildPatternMap(
+  rows: number,
+  cols: number,
+  custom?: Record<string, DotState>,
+): Record<string, DotState> {
+  const map: Record<string, DotState> = { ...custom };
+  for (const [pr, pc, state] of DEFAULT_PATTERNS) {
+    const r = Math.round((pr / (PATTERN_ROWS - 1)) * Math.max(0, rows - 1));
+    const c = Math.round((pc / (PATTERN_COLS - 1)) * Math.max(0, cols - 1));
+    map[`${r},${c}`] = state;
+  }
+  return map;
+}
+
+export default function DotGrid({
+  rows: rowsProp = 12,
+  cols: colsProp = 28,
+  pattern: customPattern,
+  className = "",
+  twinkle = false,
+  fill = false,
+}: DotGridProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const prevNeighborsRef = useRef<Set<string>>(new Set());
+  const [dimensions, setDimensions] = useState<{
+    rows: number;
+    cols: number;
+  } | null>(fill ? null : { rows: rowsProp, cols: colsProp });
+
+  useEffect(() => {
+    if (!fill || !containerRef.current) return;
+    const el = containerRef.current;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      setDimensions({
+        cols: Math.max(1, Math.floor(w / CELL_SIZE)),
+        rows: Math.max(1, Math.floor(h / CELL_SIZE)),
+      });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fill]);
+
+  const rows = dimensions?.rows ?? rowsProp;
+  const cols = dimensions?.cols ?? colsProp;
+  const patternMap = twinkle ? {} : buildPatternMap(rows, cols, customPattern);
+  const total = rows * cols;
+
+  const loadOrderMap = useMemo(() => {
+    if (!twinkle || total === 0) return null;
+    const indices = Array.from({ length: total }, (_, i) => i);
+    const shuffled = shuffle(indices);
+    const order = new Array<number>(total);
+    shuffled.forEach((idx, batchPosition) => {
+      order[idx] = batchPosition;
+    });
+    return order;
+  }, [twinkle, total]);
+
+  const loadingDurationMs = useMemo(() => {
+    if (!twinkle || total === 0) return 0;
+    const maxBatchIndex = Math.floor((total - 1) / BATCH_SIZE);
+    const maxRevealDelay = maxBatchIndex * BATCH_INTERVAL_S;
+    return (maxRevealDelay + REVEAL_DURATION_S + 0.3) * 1000;
+  }, [twinkle, total]);
+
+  const [isLive, setIsLive] = useState(false);
+  useEffect(() => {
+    if (!twinkle || loadingDurationMs === 0) return;
+    const t = setTimeout(() => setIsLive(true), loadingDurationMs);
+    return () => clearTimeout(t);
+  }, [twinkle, loadingDurationMs]);
+
+  // Fetch sensors for dot-sensor mapping (when fill + twinkle)
+  const [sensors, setSensors] = useState<Sensor[]>([]);
+  useEffect(() => {
+    if (!fill || !twinkle) return;
+    let cancelled = false;
+    getSensors({ limit: 200 })
+      .then((res) => {
+        if (!cancelled && res.sensors.length > 0) setSensors(res.sensors);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [fill, twinkle]);
+
+  // Hover/click state and tooltip
+  const [hoveredDot, setHoveredDot] = useState<{ r: number; c: number } | null>(
+    null,
+  );
+  const [clickedDot, setClickedDot] = useState<{
+    r: number;
+    c: number;
+    sensor: Sensor;
+  } | null>(null);
+  const [reading, setReading] = useState<LatestReadingResponse | null>(null);
+  const [tooltipAnchor, setTooltipAnchor] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const [readingLoading, setReadingLoading] = useState(false);
+
+  // Click away: clear clicked tooltip when clicking outside the grid
+  useEffect(() => {
+    if (!clickedDot || !containerRef.current) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setClickedDot(null);
+        setReading(null);
+        setTooltipAnchor(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [clickedDot]);
+
+  const getSensorForDot = useCallback(
+    (r: number, c: number): Sensor | null => {
+      if (sensors.length === 0) return null;
+      const idx = (r * cols + c) % sensors.length;
+      return sensors[idx] ?? null;
+    },
+    [sensors, cols],
+  );
+
+  // Event delegation: direct DOM for neighbors (instant), React for tooltip
+  const handleGridPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const target = e.target as HTMLElement;
+      const r = target.dataset?.row;
+      const c = target.dataset?.col;
+      if (r == null || c == null) return;
+      const nr = parseInt(r, 10);
+      const nc = parseInt(c, 10);
+
+      // Direct DOM: neighbor effect (bypasses React for instant feedback)
+      if (gridRef.current) {
+        const nextNeighbors = new Set<string>();
+        for (const [dr, dc] of [
+          [nr - 1, nc],
+          [nr + 1, nc],
+          [nr, nc - 1],
+          [nr, nc + 1],
+        ]) {
+          nextNeighbors.add(`${dr},${dc}`);
+        }
+        for (const key of prevNeighborsRef.current) {
+          if (!nextNeighbors.has(key)) {
+            const el = gridRef.current.querySelector(
+              `[data-row="${key.split(",")[0]}"][data-col="${key.split(",")[1]}"]`,
+            );
+            el?.classList.remove("dot-neighbor");
+          }
+        }
+        for (const key of nextNeighbors) {
+          const el = gridRef.current.querySelector(
+            `[data-row="${key.split(",")[0]}"][data-col="${key.split(",")[1]}"]`,
+          );
+          el?.classList.add("dot-neighbor");
+        }
+        prevNeighborsRef.current = nextNeighbors;
+      }
+
+      setHoveredDot((prev) =>
+        prev?.r === nr && prev?.c === nc ? prev : { r: nr, c: nc },
+      );
+      if (!clickedDot) {
+        const rect = target.getBoundingClientRect();
+        setTooltipAnchor({ x: rect.right + 8, y: rect.top });
+      }
+    },
+    [clickedDot],
+  );
+  const handleGridPointerLeave = useCallback(() => {
+    if (gridRef.current) {
+      for (const key of prevNeighborsRef.current) {
+        const [r, c] = key.split(",");
+        const el = gridRef.current.querySelector(
+          `[data-row="${r}"][data-col="${c}"]`,
+        );
+        el?.classList.remove("dot-neighbor");
+      }
+      prevNeighborsRef.current = new Set();
+    }
+    setHoveredDot(null);
+    if (!clickedDot) setTooltipAnchor(null);
+  }, [clickedDot]);
+
+  const handleDotClick = useCallback(
+    (r: number, c: number, e: React.MouseEvent) => {
+      const sensor = getSensorForDot(r, c);
+      if (!sensor) return;
+      if (clickedDot?.r === r && clickedDot?.c === c) {
+        setClickedDot(null);
+        setReading(null);
+        setTooltipAnchor(null);
+        return;
+      }
+      const rect = (e.target as HTMLElement).getBoundingClientRect();
+      setTooltipAnchor({ x: rect.right + 8, y: rect.top });
+      setClickedDot({ r, c, sensor });
+      setReading(null);
+      setReadingLoading(true);
+      getLatestReading(sensor.id)
+        .then((res) => {
+          setReading(res ?? null);
+        })
+        .catch(() => setReading(null))
+        .finally(() => setReadingLoading(false));
+    },
+    [getSensorForDot, clickedDot],
+  );
+
+  const DOT_SIZE = 6;
+  const GAP = CELL_SIZE - DOT_SIZE;
+  const grid = (
+    <div
+      ref={gridRef}
+      className={`dot-grid-container grid ${className}`}
+      style={{
+        gap: GAP,
+        gridTemplateRows: `repeat(${rows}, ${DOT_SIZE}px)`,
+        gridTemplateColumns: `repeat(${cols}, ${DOT_SIZE}px)`,
+      }}
+      onPointerMove={twinkle && fill ? handleGridPointerMove : undefined}
+      onPointerLeave={twinkle && fill ? handleGridPointerLeave : undefined}
+    >
+      {Array.from({ length: rows * cols }, (_, i) => {
+        const r = Math.floor(i / cols);
+        const c = i % cols;
+        const key = `${r},${c}`;
+        const state = patternMap[key] ?? "base";
+        const batchPosition = loadOrderMap?.[i] ?? 0;
+        const isHovered = hoveredDot?.r === r && hoveredDot?.c === c;
+        const isClicked = clickedDot?.r === r && clickedDot?.c === c;
+
+        return (
+          <Dot
+            key={key}
+            r={r}
+            c={c}
+            state={state}
+            isHovered={isHovered}
+            isClicked={isClicked}
+            twinkle={twinkle}
+            fill={fill}
+            batchPosition={batchPosition}
+            dotSize={DOT_SIZE}
+            onDotClick={handleDotClick}
+          />
+        );
+      })}
+    </div>
+  );
+
+  const activeSensor =
+    clickedDot?.sensor ??
+    (hoveredDot ? getSensorForDot(hoveredDot.r, hoveredDot.c) : null);
+  const showTooltip = twinkle && fill && activeSensor && tooltipAnchor;
+
+  if (fill) {
+    return (
+      <div ref={containerRef} className="relative h-full w-full">
+        {dimensions && (
+          <>
+            {grid}
+            {twinkle && (
+              <div
+                className="absolute bottom-0 right-0 p-3"
+                aria-live="polite"
+                aria-atomic
+              >
+                <span
+                  className={`dot-grid-status-pill dot-grid-status ${isLive ? "live" : "loading"}`}
+                >
+                  {isLive ? "Live" : "Loading"}
+                </span>
+              </div>
+            )}
+            {showTooltip && tooltipAnchor && (
+              <div
+                className="dot-grid-tooltip-pill pointer-events-none fixed z-50"
+                style={{
+                  left: tooltipAnchor.x,
+                  top: tooltipAnchor.y,
+                }}
+              >
+                {readingLoading ? (
+                  <span className="dot-grid-tooltip-content">Loading…</span>
+                ) : reading && clickedDot ? (
+                  <div className="dot-grid-tooltip-content flex flex-wrap gap-x-2 gap-y-1">
+                    {Object.entries(reading.reading.measurements).map(
+                      ([key, value]) => (
+                        <span key={key}>
+                          {formatKey(key)}: {formatValue(value)}
+                        </span>
+                      ),
+                    )}
+                  </div>
+                ) : (
+                  <span className="dot-grid-tooltip-content">
+                    {activeSensor.name}
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return grid;
+}
