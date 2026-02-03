@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
-import { Geist_Mono, JetBrains_Mono, Noto_Sans } from "next/font/google";
+import {
+  Fira_Code,
+  Geist_Mono,
+  JetBrains_Mono,
+  Noto_Sans,
+} from "next/font/google";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 import { UmamiAnalytics } from "@/components/UmamiAnalytics";
@@ -16,6 +21,11 @@ const geistMono = Geist_Mono({
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+});
+
+const firaCode = Fira_Code({
+  variable: "--font-fira-code",
   subsets: ["latin"],
 });
 
@@ -36,7 +46,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${notoSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} antialiased`}
+        className={`${notoSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${firaCode.variable} antialiased min-h-screen`}
       >
         {children}
         <UmamiAnalytics />

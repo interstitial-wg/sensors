@@ -8,13 +8,15 @@ import React, {
   useState,
 } from "react";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { getSensors, getLatestReading } from "@/lib/sensors-api";
+import { PLACEHOLDER_SENSORS } from "@/lib/placeholder-sensors";
 import type { Sensor } from "@/lib/types";
 import type { LatestReadingResponse } from "@/lib/sensors-api";
 
-const BATCH_SIZE = 80;
-const BATCH_INTERVAL_S = 0.05;
-const REVEAL_DURATION_S = 1;
+const BATCH_SIZE = 15;
+const BATCH_INTERVAL_S = 0.12;
+const REVEAL_DURATION_S = 1.4;
 
 /** Fisher-Yates shuffle - returns new shuffled array */
 function shuffle<T>(arr: T[]): T[] {
@@ -34,6 +36,29 @@ const GAP = 12; // padding between dots
 const CELL_SIZE = DOT_SIZE + GAP; // 36px per cell
 const MAX_ROWS = 40;
 const MAX_COLS = 32;
+
+/** ~8% of base dots get a subtle accent (lavender or green) - drifts over time via phase */
+const ACCENT_CHANCE = 0.08;
+const ACCENT_COLORS = [
+  "rgba(208, 200, 232, 0.7)", // lavender
+  "rgba(154, 176, 127, 0.7)", // sage green
+  "rgba(168, 196, 168, 0.65)", // softer green
+] as const;
+const ACCENT_DRIFT_INTERVAL_MS = 2800;
+
+/** Scattered hash - avoids linear/diagonal patterns from simple r+c or r*7+c*13 */
+function scatterHash(r: number, c: number, phase: number): number {
+  let h = r * 374761393 + c * 668265263 + phase * 1274126177;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function getBaseDotColor(r: number, c: number, phase: number): string {
+  const h = scatterHash(r, c, phase);
+  if (h % 100 >= ACCENT_CHANCE * 100) return "rgba(80, 80, 80, 0.6)";
+  const idx = h % ACCENT_COLORS.length;
+  return ACCENT_COLORS[idx];
+}
 
 /** Format measurement key for display */
 function formatKey(key: string): string {
@@ -59,6 +84,9 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
+/** Exported for footer alignment: grid width = cols * DOT_SIZE + (cols - 1) * GAP */
+export const DOT_GRID_CELL_SIZE = CELL_SIZE;
+
 interface DotGridProps {
   rows?: number;
   cols?: number;
@@ -69,6 +97,12 @@ interface DotGridProps {
   twinkle?: boolean;
   /** Fill container - compute rows/cols from available space (overrides rows/cols) */
   fill?: boolean;
+  /** Called when dimensions change (fill mode). Use to align footer with grid width. */
+  onDimensionsChange?: (d: {
+    cols: number;
+    rows: number;
+    widthPx: number;
+  }) => void;
 }
 
 /** Memoized dot - only re-renders when its props change (e.g. isHovered, isClicked) */
@@ -82,7 +116,9 @@ const Dot = React.memo(function Dot({
   fill,
   batchPosition,
   dotSize,
+  sensorName,
   onDotClick,
+  accentPhase,
 }: {
   r: number;
   c: number;
@@ -93,7 +129,9 @@ const Dot = React.memo(function Dot({
   fill: boolean;
   batchPosition: number;
   dotSize: number;
+  sensorName?: string | null;
   onDotClick: (r: number, c: number, e: React.MouseEvent) => void;
+  accentPhase: number;
 }) {
   const batchIndex = Math.floor(batchPosition / BATCH_SIZE);
   const revealDelay = twinkle ? batchIndex * BATCH_INTERVAL_S : 0;
@@ -103,7 +141,7 @@ const Dot = React.memo(function Dot({
   const bgColor = isClicked
     ? "#ffffff"
     : state === "base"
-      ? "rgba(80, 80, 80, 0.6)"
+      ? getBaseDotColor(r, c, accentPhase)
       : state === "solid"
         ? "#ffffff"
         : state === "green"
@@ -116,6 +154,7 @@ const Dot = React.memo(function Dot({
       data-col={c}
       role={twinkle && fill ? "button" : undefined}
       tabIndex={twinkle && fill ? 0 : undefined}
+      title={sensorName ?? undefined}
       className={`dot-cell rounded-full ${twinkle && !isHovered && !isClicked ? "animate-dot-reveal-twinkle" : ""} ${twinkle && (isHovered || isClicked) ? "dot-no-twinkle" : ""} ${twinkle && fill ? "cursor-pointer" : ""} ${isClicked ? "dot-clicked" : ""}`}
       style={{
         width: dotSize,
@@ -125,7 +164,7 @@ const Dot = React.memo(function Dot({
         boxSizing: "border-box",
         animationDelay:
           twinkle && !isHovered && !isClicked
-            ? `${revealDelay}s, ${1 + revealDelay + twinkleDelay}s`
+            ? `${revealDelay}s, ${REVEAL_DURATION_S + revealDelay + twinkleDelay}s`
             : undefined,
       }}
       onClick={
@@ -156,14 +195,25 @@ export default function DotGrid({
   className = "",
   twinkle = false,
   fill = false,
+  onDimensionsChange,
 }: DotGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const prevNeighborsRef = useRef<Set<string>>(new Set());
+  const dimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   const [dimensions, setDimensions] = useState<{
     rows: number;
     cols: number;
   } | null>(fill ? null : { rows: rowsProp, cols: colsProp });
+  const [accentPhase, setAccentPhase] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(
+      () => setAccentPhase((p) => p + 1),
+      ACCENT_DRIFT_INTERVAL_MS,
+    );
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!fill || !containerRef.current) return;
@@ -171,16 +221,32 @@ export default function DotGrid({
     const update = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      setDimensions({
-        cols: Math.min(MAX_COLS, Math.max(1, Math.floor(w / CELL_SIZE))),
-        rows: Math.min(MAX_ROWS, Math.max(1, Math.floor(h / CELL_SIZE))),
-      });
+      const cols = Math.min(MAX_COLS, Math.max(1, Math.floor(w / CELL_SIZE)));
+      const rows = Math.min(MAX_ROWS, Math.max(1, Math.floor(h / CELL_SIZE)));
+      const d = { cols, rows };
+      dimensionsRef.current = d;
+      setDimensions(d);
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
   }, [fill]);
+
+  // Report actual grid width from the rendered grid element for footer alignment
+  useEffect(() => {
+    if (!fill || !onDimensionsChange || !gridRef.current || !dimensions) return;
+    const gridEl = gridRef.current;
+    const report = () => {
+      const widthPx = gridEl.offsetWidth;
+      const d = dimensionsRef.current;
+      if (d) onDimensionsChange({ cols: d.cols, rows: d.rows, widthPx });
+    };
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(gridEl);
+    return () => ro.disconnect();
+  }, [fill, onDimensionsChange, dimensions]);
 
   const rows = dimensions?.rows ?? rowsProp;
   const cols = dimensions?.cols ?? colsProp;
@@ -207,7 +273,9 @@ export default function DotGrid({
       .then((res) => {
         if (!cancelled && res.sensors.length > 0) setSensors(res.sensors);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setSensors(PLACEHOLDER_SENSORS.slice(0, 200));
+      });
     return () => {
       cancelled = true;
     };
@@ -226,6 +294,8 @@ export default function DotGrid({
   const [tooltipAnchor, setTooltipAnchor] = useState<{
     x: number;
     y: number;
+    /** When true, tooltip is positioned to the left of the dot (for right-edge dots) */
+    preferLeft?: boolean;
   } | null>(null);
   const [readingLoading, setReadingLoading] = useState(false);
 
@@ -298,7 +368,16 @@ export default function DotGrid({
       );
       if (!clickedDot) {
         const rect = target.getBoundingClientRect();
-        setTooltipAnchor({ x: rect.right + 8, y: rect.top });
+        const tooltipWidthRight = 360;
+        const padding = 16;
+        const fitsRight =
+          rect.right + 8 + tooltipWidthRight + padding <=
+          (typeof window !== "undefined" ? window.innerWidth : 1920);
+        setTooltipAnchor(
+          fitsRight
+            ? { x: rect.right + 8, y: rect.top }
+            : { x: rect.left, y: rect.top, preferLeft: true },
+        );
       }
     },
     [clickedDot],
@@ -329,7 +408,16 @@ export default function DotGrid({
         return;
       }
       const rect = (e.target as HTMLElement).getBoundingClientRect();
-      setTooltipAnchor({ x: rect.right + 8, y: rect.top });
+      const tooltipWidthRight = 360;
+      const padding = 16;
+      const fitsRight =
+        rect.right + 8 + tooltipWidthRight + padding <=
+        (typeof window !== "undefined" ? window.innerWidth : 1920);
+      setTooltipAnchor(
+        fitsRight
+          ? { x: rect.right + 8, y: rect.top }
+          : { x: rect.left, y: rect.top, preferLeft: true },
+      );
       setClickedDot({ r, c, sensor });
       setReading(null);
       setReadingLoading(true);
@@ -351,6 +439,7 @@ export default function DotGrid({
         gap: GAP,
         gridTemplateRows: `repeat(${rows}, ${DOT_SIZE}px)`,
         gridTemplateColumns: `repeat(${cols}, ${DOT_SIZE}px)`,
+        ...(fill && { marginLeft: "auto" }),
       }}
       onPointerMove={twinkle && fill ? handleGridPointerMove : undefined}
       onPointerLeave={twinkle && fill ? handleGridPointerLeave : undefined}
@@ -364,6 +453,7 @@ export default function DotGrid({
         const isHovered = hoveredDot?.r === r && hoveredDot?.c === c;
         const isClicked = clickedDot?.r === r && clickedDot?.c === c;
 
+        const sensor = getSensorForDot(r, c);
         return (
           <Dot
             key={key}
@@ -376,7 +466,9 @@ export default function DotGrid({
             fill={fill}
             batchPosition={batchPosition}
             dotSize={DOT_SIZE}
+            sensorName={sensor?.name}
             onDotClick={handleDotClick}
+            accentPhase={accentPhase}
           />
         );
       })}
@@ -396,10 +488,13 @@ export default function DotGrid({
             {grid}
             {showTooltip && tooltipAnchor && (
               <div
-                className="dot-grid-tooltip-pill fixed z-50 flex flex-col gap-1.5"
+                className={`dot-grid-tooltip-pill fixed z-50 flex flex-col gap-1.5${!tooltipAnchor.preferLeft ? " dot-grid-tooltip-pill--right" : ""}`}
                 style={{
                   left: tooltipAnchor.x,
                   top: tooltipAnchor.y,
+                  transform: tooltipAnchor.preferLeft
+                    ? "translateX(-100%)"
+                    : undefined,
                 }}
               >
                 <div className="pointer-events-none">
@@ -423,9 +518,10 @@ export default function DotGrid({
                 </div>
                 <Link
                   href={`/explorer?sensor=${encodeURIComponent(activeSensor.id)}`}
-                  className="dot-grid-tooltip-content pointer-events-auto text-emerald-400 underline-offset-2 hover:text-emerald-300 hover:underline"
+                  className="dot-grid-tooltip-content pointer-events-auto flex items-center gap-1.5 text-emerald-400 underline-offset-2 hover:text-emerald-300 hover:underline"
                 >
-                  View sensor →
+                  View sensor
+                  <ArrowRight className="size-3.5 shrink-0" />
                 </Link>
               </div>
             )}

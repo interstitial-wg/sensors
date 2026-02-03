@@ -50,8 +50,23 @@ export default function ExplorerClient() {
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get("q")?.trim() ?? "";
   const focusSensorIdParam = searchParams.get("sensor")?.trim() ?? null;
+  const typeParam = searchParams.get("type")?.trim() ?? null;
+  const providerParam = searchParams.get("provider")?.trim() ?? null;
+  const initialTypes = useMemo(() => {
+    if (!typeParam) return new Set<string>();
+    return new Set(
+      typeParam
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+    );
+  }, [typeParam]);
   const [sensorTypes, setSensorTypes] = useState<string[]>([]);
-  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(initialTypes);
+
+  useEffect(() => {
+    setSelectedTypes(initialTypes);
+  }, [initialTypes]);
   const [allSensors, setAllSensors] = useState<Sensor[]>([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [loadingSensors, setLoadingSensors] = useState(true);
@@ -160,6 +175,7 @@ export default function ExplorerClient() {
         : [...selectedTypes].sort();
     const bbox = debouncedBoundsKey != null ? boundsForFetchRef.current : null;
     const searchQuery = initialSearch || undefined;
+    const providerFilter = providerParam || undefined;
 
     // Viewport cushion: skip refetch if current viewport is still inside the last fetched (expanded) bbox
     if (
@@ -174,7 +190,7 @@ export default function ExplorerClient() {
     // Client cache: show cached data immediately for this viewport+filter+search, then revalidate in background
     const cacheKey =
       debouncedBoundsKey != null
-        ? `${debouncedBoundsKey}_${selectedTypesKey}_${searchQuery ?? ""}`
+        ? `${debouncedBoundsKey}_${selectedTypesKey}_${searchQuery ?? ""}_${providerFilter ?? ""}`
         : null;
     const cached = cacheKey ? bboxCacheRef.current.get(cacheKey) : undefined;
     if (cached !== undefined) {
@@ -211,6 +227,7 @@ export default function ExplorerClient() {
             limit: BBOX_PAGE_LIMIT,
             ...(type != null && { sensor_type: type }),
             ...(searchQuery && { search: searchQuery }),
+            ...(providerFilter && { provider: providerFilter }),
           };
           for (let segIndex = 0; segIndex < segments.length; segIndex++) {
             const seg = segments[segIndex];
@@ -280,6 +297,7 @@ export default function ExplorerClient() {
                   page,
                   ...(sensorType != null && { sensor_type: sensorType }),
                   ...(searchQuery && { search: searchQuery }),
+                  ...(providerFilter && { provider: providerFilter }),
                 });
                 if (cancelled || myFetchId !== fetchIdRef.current) return;
                 const byId = new Map(accumulated.map((s) => [s.id, s]));
@@ -333,7 +351,7 @@ export default function ExplorerClient() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTypes, debouncedBoundsKey, initialSearch]);
+  }, [selectedTypes, debouncedBoundsKey, initialSearch, providerParam]);
 
   const filteredByType = useMemo(() => {
     if (selectedTypes.size === 0) return allSensors;

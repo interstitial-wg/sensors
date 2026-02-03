@@ -100,7 +100,14 @@ export async function getSensors(
 function getPlaceholderSensors(
   options: GetSensorsOptions,
 ): Promise<SensorsListResponse> {
-  const { sensor_type, status, search, page = 1, limit = 100 } = options;
+  const {
+    sensor_type,
+    status,
+    search,
+    provider,
+    page = 1,
+    limit = 100,
+  } = options;
   let list = [...PLACEHOLDER_SENSORS];
 
   if (sensor_type) {
@@ -108,6 +115,13 @@ function getPlaceholderSensors(
   }
   if (status) {
     list = list.filter((s) => s.status === status);
+  }
+  if (provider) {
+    const slugs = provider.split(",").map((p) => p.trim().toLowerCase());
+    list = list.filter((s) => {
+      const slug = s.provider_slug?.toLowerCase() ?? "";
+      return slugs.some((p) => slug === p || slug.startsWith(`${p}_`));
+    });
   }
   if (search?.trim()) {
     const q = search.trim().toLowerCase();
