@@ -232,28 +232,6 @@ export async function buildAssistantReply(
       }
     }
   }
-  // #region agent log
-  fetch("http://127.0.0.1:7246/ingest/78cffbd9-4138-432a-a52d-d31e500958fc", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "assistant-reply.ts:valuesByKey",
-      message: "Temperature extraction debug",
-      data: {
-        hypothesisId: "A",
-        uniqueKeys,
-        air_temperature_c_count: valuesByKey.air_temperature_c?.count ?? 0,
-        water_temperature_c_count: valuesByKey.water_temperature_c?.count ?? 0,
-        sensorsWithAnyTempKey,
-        tempLikeKeysFromApi: tempLikeKeys,
-        allMeasurementKeysChecked: allMeasurementKeys,
-        sampleRawKeys,
-      },
-      timestamp: Date.now(),
-      sessionId: "debug-session",
-    }),
-  }).catch(() => {});
-  // #endregion
 
   const averages: {
     label: string;
