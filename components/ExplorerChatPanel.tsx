@@ -36,7 +36,7 @@ function renderWithBold(text: string) {
 function ComputingBubble({ phase }: { phase: string }) {
   const label = PHASE_LABELS[phase] ?? "Working…";
   return (
-    <div className="max-w-[90%] rounded-2xl border border-white/10 px-4 py-2.5 text-sm text-white/95 animate-computing-pulse">
+    <div className="max-w-[90%] rounded-2xl border border-black/10 px-4 py-2.5 text-sm text-foreground/95 dark:border-white/10 dark:text-white/95 animate-computing-pulse">
       <p>{label}</p>
     </div>
   );
@@ -48,11 +48,11 @@ function ThinkingSteps({ steps }: { steps: string[] }) {
   if (steps.length === 0) return null;
   const labels = steps.map((s) => PHASE_LABELS[s] ?? s);
   return (
-    <div className="mt-3 border-t border-white/10 pt-2">
+    <div className="mt-3 border-t border-black/10 pt-2 dark:border-white/10">
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
-        className="flex w-full items-center gap-1.5 text-xs text-white/50 hover:text-white/70 transition"
+        className="flex w-full items-center gap-1.5 text-xs text-foreground/50 hover:text-foreground/70 transition dark:text-white/50 dark:hover:text-white/70"
       >
         {expanded ? (
           <ChevronDown className="h-3.5 w-3.5 shrink-0" />
@@ -62,10 +62,10 @@ function ThinkingSteps({ steps }: { steps: string[] }) {
         <span>Thinking steps</span>
       </button>
       {expanded && (
-        <ul className="mt-1.5 space-y-1 pl-5 text-xs text-white/50">
+        <ul className="mt-1.5 space-y-1 pl-5 text-xs text-foreground/50 dark:text-white/50">
           {labels.map((label, i) => (
             <li key={i} className="flex items-center gap-2">
-              <span className="h-1 w-1 shrink-0 rounded-full bg-white/40" />
+              <span className="h-1 w-1 shrink-0 rounded-full bg-foreground/40 dark:bg-white/40" />
               {label}
             </li>
           ))}
@@ -121,7 +121,7 @@ function AssistantBubble({
   return (
     <div
       ref={bubbleRef}
-      className="max-w-[90%] rounded-2xl bg-[#0f0f0f]/80 px-4 py-2.5 text-sm text-white/95"
+      className="max-w-[90%] rounded-2xl bg-[#f0eeeb]/95 px-4 py-2.5 text-sm text-foreground/95 dark:bg-[#0f0f0f]/80 dark:text-white/95"
     >
       <p className="whitespace-pre-wrap">
         {displayedLines.map((line, i) => (
@@ -234,20 +234,9 @@ export default function ExplorerChatPanel({
     else if (loadingSensors) setComputingPhase("looking_for_sensors");
   }, [isFindingLocation, loadingSensors]);
 
-  // When we have a user message and we're waiting (finding location or loading sensors), show ComputingBubble
-  useEffect(() => {
-    if (messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (last.role !== "user") return;
-    if (!isFindingLocation && !loadingSensors) return;
-    if (messages.some((m) => m.content === COMPUTING_PLACEHOLDER)) return;
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", content: COMPUTING_PLACEHOLDER },
-    ]);
-  }, [messages, isFindingLocation, loadingSensors]);
-
-  // When loading completes and we have a user message at the end, build assistant reply
+  // When loading completes and we have a user message at the end, build assistant reply.
+  // Run with whatever sensors we have (viewport or location) — don't wait for location fetch,
+  // so we show results immediately like before (viewport sensors cover Oakland/SF Bay).
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = loadingSensors;
@@ -259,22 +248,12 @@ export default function ExplorerChatPanel({
       wasLoading,
       pendingSearch: pendingSearchRef.current,
       sensorCount: sensorsRef.current.length,
-      isFindingLocation,
     });
 
     if (messages.length === 0) return;
     const last = messages[messages.length - 1];
-    const lastIsUser = last.role === "user";
-    const lastIsComputing =
-      last.role === "assistant" && last.content === COMPUTING_PLACEHOLDER;
-    if (!lastIsUser && !lastIsComputing) {
-      console.log(
-        "[ExplorerChatPanel] skipping: last message is not user or computing",
-      );
-      return;
-    }
-    if (isFindingLocation) {
-      console.log("[ExplorerChatPanel] skipping: finding location");
+    if (last.role !== "user") {
+      console.log("[ExplorerChatPanel] skipping: last message is not user");
       return;
     }
     if (loadingSensors) {
@@ -293,11 +272,7 @@ export default function ExplorerChatPanel({
     cancelBuildRef.current?.();
     cancelBuildRef.current = null;
 
-    const userQuery = lastIsUser
-      ? last.content
-      : messages[messages.length - 2]?.role === "user"
-        ? messages[messages.length - 2].content
-        : last.content;
+    const userQuery = last.content;
     const sensorsToUse = sensorsRef.current;
     let cancelled = false;
     cancelBuildRef.current = () => {
@@ -376,12 +351,10 @@ export default function ExplorerChatPanel({
         });
     };
 
-    if (lastIsUser) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: COMPUTING_PLACEHOLDER },
-      ]);
-    }
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: COMPUTING_PLACEHOLDER },
+    ]);
     runReply();
     return () => {
       // Don't cancel here - effect re-runs when we add COMPUTING_PLACEHOLDER, which would wrongly discard the reply.
@@ -394,7 +367,6 @@ export default function ExplorerChatPanel({
     locationFetchUsedFallback,
     requestedDataTypes,
     hasLocationCoords,
-    isFindingLocation,
   ]);
 
   useEffect(() => {
@@ -408,20 +380,20 @@ export default function ExplorerChatPanel({
     "—";
 
   return (
-    <div className="flex h-full min-h-0 flex-col text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
+    <div className="flex h-full min-h-0 flex-col text-foreground dark:text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.3)] dark:[text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
       {/* Content - transparent, map shows through; messages anchor above input */}
       <div className="scrollbar-hide flex min-h-0 flex-1 flex-col justify-end overflow-y-auto p-4">
         {focusSensor ? (
           <div className="space-y-4">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="text-sm font-semibold text-white/95 shrink min-w-0">
+              <h3 className="text-sm font-semibold text-foreground/95 shrink min-w-0 dark:text-white/95">
                 {focusSensor.name}
               </h3>
               {onCloseFocus && (
                 <button
                   type="button"
                   onClick={onCloseFocus}
-                  className="shrink-0 rounded-full p-1 text-white/60 hover:bg-white/10 hover:text-white transition"
+                  className="shrink-0 rounded-full p-1 text-foreground/60 hover:bg-black/10 hover:text-foreground transition dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white"
                   aria-label="Close sensor detail"
                 >
                   <svg
@@ -442,56 +414,58 @@ export default function ExplorerChatPanel({
               )}
             </div>
             <div>
-              <p className="mt-0.5 text-xs text-white/60">{sourceName}</p>
+              <p className="mt-0.5 text-xs text-foreground/60 dark:text-white/60">
+                {sourceName}
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <div>
-                <span className="text-xs font-medium uppercase tracking-wider text-white/50">
+                <span className="text-xs font-medium uppercase tracking-wider text-foreground/50 dark:text-white/50">
                   Type
                 </span>
-                <div className="mt-0.5 truncate text-white/90">
+                <div className="mt-0.5 truncate text-foreground/90 dark:text-white/90">
                   {focusSensor.sensor_type.replace(/_/g, " ")}
                 </div>
               </div>
               <div>
-                <span className="text-xs font-medium uppercase tracking-wider text-white/50">
+                <span className="text-xs font-medium uppercase tracking-wider text-foreground/50 dark:text-white/50">
                   Start
                 </span>
-                <div className="mt-0.5 truncate text-white/90">
+                <div className="mt-0.5 truncate text-foreground/90 dark:text-white/90">
                   {focusSensor.deployment_date ?? "—"}
                 </div>
               </div>
               <div>
-                <span className="text-xs font-medium uppercase tracking-wider text-white/50">
+                <span className="text-xs font-medium uppercase tracking-wider text-foreground/50 dark:text-white/50">
                   End
                 </span>
-                <div className="mt-0.5 truncate text-white/90">
+                <div className="mt-0.5 truncate text-foreground/90 dark:text-white/90">
                   {focusSensor.decommissioned_date ?? "Ongoing"}
                 </div>
               </div>
               <div className="col-span-2">
-                <span className="text-xs font-medium uppercase tracking-wider text-white/50">
+                <span className="text-xs font-medium uppercase tracking-wider text-foreground/50 dark:text-white/50">
                   ID
                 </span>
-                <div className="mt-0.5 truncate font-mono text-xs text-white/90">
+                <div className="mt-0.5 truncate font-mono text-xs text-foreground/90 dark:text-white/90">
                   {focusSensor.id}
                 </div>
               </div>
               <div>
-                <span className="text-xs font-medium uppercase tracking-wider text-white/50">
+                <span className="text-xs font-medium uppercase tracking-wider text-foreground/50 dark:text-white/50">
                   Latitude
                 </span>
-                <div className="mt-0.5 font-mono text-white/90">
+                <div className="mt-0.5 font-mono text-foreground/90 dark:text-white/90">
                   {focusSensor.latitude != null
                     ? toDMS(focusSensor.latitude, true)
                     : "—"}
                 </div>
               </div>
               <div>
-                <span className="text-xs font-medium uppercase tracking-wider text-white/50">
+                <span className="text-xs font-medium uppercase tracking-wider text-foreground/50 dark:text-white/50">
                   Longitude
                 </span>
-                <div className="mt-0.5 font-mono text-white/90">
+                <div className="mt-0.5 font-mono text-foreground/90 dark:text-white/90">
                   {focusSensor.longitude != null
                     ? toDMS(focusSensor.longitude, false)
                     : "—"}
@@ -507,7 +481,7 @@ export default function ExplorerChatPanel({
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 {m.role === "user" ? (
-                  <div className="max-w-[90%] rounded-2xl bg-white/20 px-4 py-2.5 text-sm text-white">
+                  <div className="max-w-[90%] rounded-2xl bg-black/15 px-4 py-2.5 text-sm text-foreground dark:bg-white/20 dark:text-white">
                     <p className="whitespace-pre-wrap">{m.content}</p>
                   </div>
                 ) : m.content === COMPUTING_PLACEHOLDER ? (
@@ -530,7 +504,7 @@ export default function ExplorerChatPanel({
       </div>
 
       {/* Chat input bar - has background like WhatsApp */}
-      <div className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-[#0f0f0f]/95 p-0 backdrop-blur-sm">
+      <div className="flex shrink-0 items-center gap-2 rounded-xl border border-black/10 bg-white/95 p-0 backdrop-blur-sm dark:border-white/10 dark:bg-[#0f0f0f]/95">
         <SearchInput
           mode="explorer"
           variant="inline"

@@ -14,7 +14,7 @@ export default function StatusIndicator() {
 
   return (
     <span
-      className={`flex items-center gap-2 rounded-full bg-white/5 py-1.5 pl-[18px] pr-[17px] text-sm dot-grid-status ${loading ? "loading" : "live"}`}
+      className={`flex items-center gap-2 rounded-full bg-black/5 py-1.5 pl-[18px] pr-[17px] text-sm dot-grid-status dark:bg-white/5 ${loading ? "loading" : "live"}`}
     >
       <span
         className={`h-2 w-2 shrink-0 rounded-full ${loading ? "animate-pulse bg-[#FD581E]" : "bg-[#9AB07F]"}`}

@@ -26,7 +26,7 @@ export default function DotGridSection() {
           aria-hidden
         >
           <span
-            className="flex rotate-180 flex-row items-center gap-1.5 text-sm font-medium tracking-wide text-white/50 select-none"
+            className="flex rotate-180 flex-row items-center gap-1.5 text-sm font-medium tracking-wide text-foreground/50 select-none"
             style={{ writingMode: "vertical-lr", textOrientation: "mixed" }}
           >
             explore sensors

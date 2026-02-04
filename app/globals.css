@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
+/* Dark mode via data-theme attribute (default: dark) */
+@custom-variant dark (&&:where([data-theme=dark], [data-theme=dark] *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Light theme (default when data-theme="light") */
+  --background: #f8f6f3;
+  --foreground: #1a1a1a;
+  --surface: #ffffff;
+  --surface-muted: #f0eeeb;
+  --muted: #6b6b6b;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-muted: rgba(0, 0, 0, 0.06);
+  --dot-outline: rgba(26, 26, 26, 0.9);
 
   /* Our colors palette */
   --color-sage: #a0c4a0;
@@ -18,18 +28,22 @@
   --color-coral: #f06030;
 }
 
+[data-theme="dark"] {
+  --background: #1a1a1a;
+  --foreground: #ededed;
+  --surface: #0f0f0f;
+  --surface-muted: #262626;
+  --muted: #a3a3a3;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-muted: rgba(255, 255, 255, 0.06);
+  --dot-outline: rgba(255, 255, 255, 0.9);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-noto-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 html,
@@ -39,54 +53,69 @@ body {
 }
 
 html {
-  background: #1a1a1a;
+  background: var(--background);
 }
 
 body {
-  background: #1a1a1a;
+  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
-/* Minimal map UI: compact controls and popup (dark theme) */
+/* Minimal map UI: compact controls and popup - theme-aware */
 .sensor-map-minimal .maplibregl-canvas-container {
   filter: brightness(1.2);
+}
+[data-theme="light"] .sensor-map-minimal .maplibregl-canvas-container {
+  filter: brightness(0.95);
 }
 .sensor-map-minimal .maplibregl-ctrl-group {
   border: none;
   border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: var(--surface-muted);
+  backdrop-filter: blur(8px);
+}
+[data-theme="dark"] .sensor-map-minimal .maplibregl-ctrl-group {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   background: rgba(26, 26, 26, 0.9);
-  backdrop-filter: blur(8px);
 }
 .sensor-map-minimal .maplibregl-ctrl-group button {
   width: 28px;
   height: 28px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--foreground);
+  opacity: 0.9;
 }
-/* Invert MapLibre's dark background-image icons so they're visible on dark controls */
-.sensor-map-minimal .maplibregl-ctrl-group .maplibregl-ctrl-icon {
+[data-theme="dark"]
+  .sensor-map-minimal
+  .maplibregl-ctrl-group
+  .maplibregl-ctrl-icon {
   filter: invert(1);
 }
 .sensor-map-minimal .maplibregl-ctrl-group button:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+[data-theme="dark"] .sensor-map-minimal .maplibregl-ctrl-group button:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 .sensor-map-minimal .maplibregl-ctrl-attrib {
   font-size: 10px;
   opacity: 0.7;
-  background: rgba(26, 26, 26, 0.7);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--surface-muted);
+  color: var(--muted);
 }
 .sensor-map-minimal .maplibregl-popup-content {
   padding: 0;
   border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
   background: transparent;
   border: none;
   overflow: visible;
 }
+[data-theme="dark"] .sensor-map-minimal .maplibregl-popup-content {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
 .sensor-map-minimal .maplibregl-popup {
-  /* Allow close button to position relative to popup */
   position: relative;
 }
 .sensor-map-minimal .maplibregl-popup-close-button {
@@ -97,18 +126,29 @@ body {
   left: auto;
   font-size: 16px;
   padding: 6px 8px;
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(0, 0, 0, 0.4);
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
   transition:
     color 0.15s,
     background 0.15s;
 }
+[data-theme="dark"] .sensor-map-minimal .maplibregl-popup-close-button {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.4);
+}
 .sensor-map-minimal .maplibregl-popup-close-button:hover {
+  color: var(--foreground);
+  background: rgba(0, 0, 0, 0.35);
+}
+[data-theme="dark"] .sensor-map-minimal .maplibregl-popup-close-button:hover {
   color: rgba(255, 255, 255, 0.95);
   background: rgba(0, 0, 0, 0.6);
 }
 .sensor-map-minimal .maplibregl-popup-tip {
+  border-top-color: var(--surface-muted);
+}
+[data-theme="dark"] .sensor-map-minimal .maplibregl-popup-tip {
   border-top-color: #1a1a1a;
 }
 
@@ -152,7 +192,7 @@ body {
 
 /* Instant hover feedback - bypasses React for responsiveness */
 .dot-cell:hover:not(.dot-clicked) {
-  border: 1.5px solid rgba(255, 255, 255, 0.9) !important;
+  border: 1.5px solid var(--foreground) !important;
   animation: none !important;
   opacity: 1 !important;
 }
@@ -160,6 +200,9 @@ body {
 /* Neighbor-of-hovered: subtle highlight for "data field" feel */
 .dot-cell.dot-neighbor {
   background-color: rgba(110, 110, 110, 0.8) !important;
+}
+[data-theme="light"] .dot-cell.dot-neighbor {
+  background-color: rgba(140, 140, 140, 0.5) !important;
 }
 
 /* Smooth accent color drift on base dots */
@@ -199,10 +242,13 @@ body {
   display: inline-block;
   padding: 0.35rem 0.75rem;
   border-radius: 0.375rem;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: color 0.3s ease;
+}
+[data-theme="dark"] .dot-grid-status-pill {
+  background: rgba(0, 0, 0, 0.35);
 }
 
 .dot-grid-status {
@@ -226,10 +272,17 @@ body {
 .dot-grid-tooltip-pill {
   padding: 0.35rem 0.75rem;
   border-radius: 0.375rem;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(255, 255, 255, 0.95);
+  color: #1a1a1a;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   max-width: 280px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+[data-theme="dark"] .dot-grid-tooltip-pill {
+  background: rgba(0, 0, 0, 0.65);
+  color: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* Wider when positioned on the right (more horizontal space available) */
@@ -241,7 +294,7 @@ body {
   font-family: var(--font-fira-code), ui-monospace, monospace;
   font-size: 0.75rem;
   letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.98);
+  color: inherit;
 }
 
 /* Computing bubble: pulsing gradient while work is happening */
@@ -260,14 +313,24 @@ body {
 .animate-computing-pulse {
   background: linear-gradient(
     110deg,
+    rgba(248, 246, 243, 0.95) 0%,
+    rgba(240, 238, 235, 0.95) 25%,
+    rgba(245, 243, 240, 0.95) 50%,
+    rgba(240, 238, 235, 0.95) 75%,
+    rgba(248, 246, 243, 0.95) 100%
+  );
+  background-size: 200% 200%;
+  animation: computing-pulse 2.5s ease-in-out infinite;
+}
+[data-theme="dark"] .animate-computing-pulse {
+  background: linear-gradient(
+    110deg,
     rgba(26, 26, 26, 0.95) 0%,
     rgba(45, 55, 72, 0.95) 25%,
     rgba(30, 41, 59, 0.95) 50%,
     rgba(45, 55, 72, 0.95) 75%,
     rgba(26, 26, 26, 0.95) 100%
   );
-  background-size: 200% 200%;
-  animation: computing-pulse 2.5s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -353,6 +353,46 @@ export default function ExplorerClient() {
             accumulated = fallbackAcc;
           }
 
+          // Bbox fallback: when radius returns 0 (API may not support radius), try default bbox
+          if (accumulated.length === 0) {
+            const fallbackAcc: Sensor[] = [];
+            const fallbackSeen = new Set<string>();
+            for (const sensorType of typesToFetch) {
+              let page = 1;
+              while (page <= RADIUS_MAX_PAGES) {
+                const res = await getSensors({
+                  limit: 500,
+                  page,
+                  min_lat: INITIAL_BOUNDS.south,
+                  min_lon: INITIAL_BOUNDS.west,
+                  max_lat: INITIAL_BOUNDS.north,
+                  max_lon: INITIAL_BOUNDS.east,
+                  ...(sensorType != null && { sensor_type: sensorType }),
+                  ...(providerFilter && { provider: providerFilter }),
+                });
+                if (cancelled || myFetchId !== fetchIdRef.current) return [];
+                for (const s of res.sensors) {
+                  if (!fallbackSeen.has(s.id)) {
+                    fallbackSeen.add(s.id);
+                    fallbackAcc.push(s);
+                  }
+                }
+                const hasMore =
+                  res.sensors.length === 500 &&
+                  page < res.pagination.total_pages;
+                if (!hasMore) break;
+                page += 1;
+              }
+            }
+            if (fallbackAcc.length > 0) {
+              accumulated = sortSensorsByCenter(fallbackAcc, {
+                lat: locationLat,
+                lon: locationLon,
+              });
+              usedFallback = true;
+            }
+          }
+
           if (myFetchId !== fetchIdRef.current) return;
           const sorted = sortSensorsByCenter(accumulated, {
             lat: locationLat,

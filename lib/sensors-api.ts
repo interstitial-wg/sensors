@@ -97,6 +97,24 @@ export async function getSensors(
   return fetchApiSensors(options);
 }
 
+/** Haversine distance in km */
+function haversineKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function getPlaceholderSensors(
   options: GetSensorsOptions,
 ): Promise<SensorsListResponse> {
@@ -107,6 +125,13 @@ function getPlaceholderSensors(
     provider,
     page = 1,
     limit = 100,
+    min_lat,
+    min_lon,
+    max_lat,
+    max_lon,
+    lat,
+    lon,
+    radius_km = 50,
   } = options;
   let list = [...PLACEHOLDER_SENSORS];
 
@@ -133,6 +158,26 @@ function getPlaceholderSensors(
         s.provider_name?.toLowerCase().includes(q) ||
         s.feed_name?.toLowerCase().includes(q),
     );
+  }
+
+  // Location filters (match real API behavior)
+  const hasBbox =
+    min_lat != null && min_lon != null && max_lat != null && max_lon != null;
+  if (hasBbox) {
+    list = list.filter(
+      (s) =>
+        s.latitude != null &&
+        s.longitude != null &&
+        s.latitude >= min_lat! &&
+        s.latitude <= max_lat! &&
+        s.longitude >= min_lon! &&
+        s.longitude <= max_lon!,
+    );
+  } else if (lat != null && lon != null) {
+    list = list.filter((s) => {
+      if (s.latitude == null || s.longitude == null) return false;
+      return haversineKm(lat, lon, s.latitude, s.longitude) <= radius_km;
+    });
   }
 
   const total = list.length;

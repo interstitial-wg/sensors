@@ -3,7 +3,7 @@ import ExplorerClient from "./ExplorerClient";
 
 function ExplorerFallback() {
   return (
-    <div className="flex h-screen items-center justify-center bg-zinc-100 dark:bg-zinc-900">
+    <div className="flex h-screen items-center justify-center bg-background">
       <span className="text-sm text-zinc-500">Loading explorer…</span>
     </div>
   );

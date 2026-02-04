@@ -185,14 +185,14 @@ export default function SensorHoverCard({
           />
         </>
       ) : (
-        <span className="inline-flex items-center gap-1.5 text-white/60">
+        <span className="inline-flex items-center gap-1.5 text-foreground/60 dark:text-white/60">
           <span className="size-2 animate-pulse rounded-full bg-current" />
           Loading…
         </span>
       )}
     </span>
   ) : notAvailable ? (
-    <span className="inline-flex rounded-md bg-white/15 px-2 py-0.5 text-xs font-medium text-white/70">
+    <span className="inline-flex rounded-md bg-black/15 px-2 py-0.5 text-xs font-medium text-foreground/70 dark:bg-white/15 dark:text-white/70">
       Not available
     </span>
   ) : lastReadingTimestamp ? (
@@ -202,21 +202,21 @@ export default function SensorHoverCard({
   );
 
   return (
-    <div className="flex min-w-64 max-w-80 flex-col rounded-xl border border-white/10 bg-[#1a1a1a]/95 p-5 shadow-xl backdrop-blur-md">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-white/50">
+    <div className="flex min-w-64 max-w-80 flex-col rounded-xl border border-black/10 bg-white/95 p-5 shadow-xl backdrop-blur-md dark:border-white/10 dark:bg-[#1a1a1a]/95">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/50 dark:text-white/50">
         Sensor details
       </h3>
       <div className="mt-4 grid flex-1 grid-cols-1 gap-4">
         <div>
-          <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-foreground/40 dark:text-white/40">
             Name
           </div>
-          <div className="mt-1 truncate text-base font-semibold text-white/95">
+          <div className="mt-1 truncate text-base font-semibold text-foreground/95 dark:text-white/95">
             {sensor.name}
           </div>
         </div>
         <div>
-          <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-foreground/40 dark:text-white/40">
             Location
           </div>
           <div className="mt-1 truncate text-sm font-medium text-emerald-400">
@@ -224,7 +224,7 @@ export default function SensorHoverCard({
           </div>
         </div>
         <div>
-          <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-foreground/40 dark:text-white/40">
             Reading
           </div>
           {loadingReading && shouldFetchReading ? (
@@ -232,7 +232,7 @@ export default function SensorHoverCard({
               {[1, 2, 3].map((i) => (
                 <div
                   key={i}
-                  className="h-5 animate-pulse rounded bg-white/10"
+                  className="h-5 animate-pulse rounded bg-black/10 dark:bg-white/10"
                   aria-hidden
                 />
               ))}
@@ -245,9 +245,9 @@ export default function SensorHoverCard({
                   return (
                     <div
                       key={periodLabel}
-                      className="overflow-hidden rounded-lg border border-white/10"
+                      className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10"
                     >
-                      <div className="border-b border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/50">
+                      <div className="border-b border-black/10 bg-black/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-foreground/50 dark:border-white/10 dark:bg-white/5 dark:text-white/50">
                         {periodLabel}
                       </div>
                       <table className="w-full text-left text-xs">
@@ -255,12 +255,12 @@ export default function SensorHoverCard({
                           {entries.map(({ key, value }) => (
                             <tr
                               key={key}
-                              className="border-b border-white/5 last:border-b-0"
+                              className="border-b border-black/5 last:border-b-0 dark:border-white/5"
                             >
-                              <td className="py-1.5 pl-3 pr-2 font-medium text-white/60">
+                              <td className="py-1.5 pl-3 pr-2 font-medium text-foreground/60 dark:text-white/60">
                                 {formatMeasurementKey(key)}
                               </td>
-                              <td className="py-1.5 pr-3 text-right font-semibold text-white/95">
+                              <td className="py-1.5 pr-3 text-right font-semibold text-foreground/95 dark:text-white/95">
                                 {formatMeasurementValue(value)}
                               </td>
                             </tr>
@@ -273,19 +273,23 @@ export default function SensorHoverCard({
               )}
             </div>
           ) : notAvailable ? (
-            <div className="mt-2 text-xs text-white/50">Not available</div>
+            <div className="mt-2 text-xs text-foreground/50 dark:text-white/50">
+              Not available
+            </div>
           ) : (
-            <div className="mt-2 text-xs text-white/50">—</div>
+            <div className="mt-2 text-xs text-foreground/50 dark:text-white/50">
+              —
+            </div>
           )}
         </div>
         {(sensor.provider_name ||
           sensor.feed_name ||
           sensor.connected_service) && (
           <div>
-            <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-foreground/40 dark:text-white/40">
               Data source
             </div>
-            <div className="mt-1 truncate text-sm text-white/70">
+            <div className="mt-1 truncate text-sm text-foreground/70 dark:text-white/70">
               {[
                 sensor.provider_name,
                 sensor.feed_name,
@@ -297,9 +301,11 @@ export default function SensorHoverCard({
           </div>
         )}
       </div>
-      <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-4">
-        <span className="text-xs text-white/50">Last reading</span>
-        <span className="text-xs font-semibold text-white/95">
+      <div className="mt-4 flex items-center justify-between border-t border-black/10 pt-4 dark:border-white/10">
+        <span className="text-xs text-foreground/50 dark:text-white/50">
+          Last reading
+        </span>
+        <span className="text-xs font-semibold text-foreground/95 dark:text-white/95">
           {lastReadingDisplay}
         </span>
       </div>

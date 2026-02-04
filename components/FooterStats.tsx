@@ -20,11 +20,11 @@ export default function FooterStats() {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="flex items-center gap-2 rounded-full bg-white/5 px-3 py-1.5 text-sm text-white/80">
+      <span className="flex items-center gap-2 rounded-full bg-black/5 px-3 py-1.5 text-sm text-foreground/80 dark:bg-white/5 dark:text-white/80">
         <DraftingCompass className="h-3.5 w-3.5 shrink-0" aria-hidden />
         {sensorsLabel}
       </span>
-      <span className="flex items-center gap-2 rounded-full bg-white/5 px-3 py-1.5 text-sm text-white/80">
+      <span className="flex items-center gap-2 rounded-full bg-black/5 px-3 py-1.5 text-sm text-foreground/80 dark:bg-white/5 dark:text-white/80">
         <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
         {agenciesLabel}
       </span>

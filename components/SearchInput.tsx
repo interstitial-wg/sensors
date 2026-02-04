@@ -45,21 +45,21 @@ function PillDropdown({
       <button
         type="button"
         onClick={onToggle}
-        className={`flex items-center gap-1.5 rounded-full border bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 transition hover:bg-white/10 hover:text-white ${
+        className={`flex items-center gap-1.5 rounded-full border bg-black/5 px-3 py-1.5 text-xs font-medium text-foreground/80 transition hover:bg-black/10 hover:text-foreground dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10 dark:hover:text-white ${
           isOpen
-            ? "border-white/25"
-            : "border-transparent hover:border-white/25"
+            ? "border-foreground/25 dark:border-white/25"
+            : "border-transparent hover:border-foreground/25 dark:hover:border-white/25"
         }`}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-label={ariaLabel}
       >
-        <Icon className="h-3.5 w-3.5 shrink-0 text-white/60" />
+        <Icon className="h-3.5 w-3.5 shrink-0 text-foreground/60 dark:text-white/60" />
         <span>{summary}</span>
         {isOpen ? (
-          <ChevronUp className="h-3 w-3 shrink-0 text-white/60" />
+          <ChevronUp className="h-3 w-3 shrink-0 text-foreground/60 dark:text-white/60" />
         ) : (
-          <ChevronDown className="h-3 w-3 shrink-0 text-white/60" />
+          <ChevronDown className="h-3 w-3 shrink-0 text-foreground/60 dark:text-white/60" />
         )}
       </button>
       {isOpen && children}
@@ -206,8 +206,8 @@ export default function SearchInput({
 
   const formClass =
     variant === "inline"
-      ? "flex w-full min-w-0 flex-1 flex-col gap-0 rounded-lg border border-white/10 bg-white/5 transition focus-within:border-white/20 focus-within:bg-white/[0.07]"
-      : "flex w-full max-w-2xl flex-col gap-0 rounded-xl border border-white/15 bg-white/[0.07] shadow-lg shadow-black/20 transition focus-within:border-white/25 focus-within:bg-white/9 focus-within:shadow-xl focus-within:shadow-black/25";
+      ? "flex w-full min-w-0 flex-1 flex-col gap-0 rounded-lg border border-black/10 bg-black/5 transition focus-within:border-black/20 focus-within:bg-black/[0.07] dark:border-white/10 dark:bg-white/5 dark:focus-within:border-white/20 dark:focus-within:bg-white/[0.07]"
+      : "flex w-full max-w-2xl flex-col gap-0 rounded-xl border border-black/15 bg-black/[0.07] shadow-lg shadow-black/20 transition focus-within:border-black/25 focus-within:bg-black/10 focus-within:shadow-xl focus-within:shadow-black/25 dark:border-white/15 dark:bg-white/[0.07] dark:focus-within:border-white/25 dark:focus-within:bg-white/9 dark:focus-within:shadow-black/25";
 
   return (
     <form onSubmit={handleSubmit} className={formClass}>
@@ -223,7 +223,7 @@ export default function SearchInput({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={PLACEHOLDER_EXAMPLES[placeholderIndex]}
-          className={`w-full bg-transparent text-white placeholder:text-white/45 focus:outline-none ${
+          className={`w-full bg-transparent text-foreground placeholder:text-foreground/45 dark:text-white dark:placeholder:text-white/45 focus:outline-none ${
             variant === "inline"
               ? "min-h-[36px] text-sm"
               : "min-h-[36px] text-base md:min-h-[40px] md:text-lg"
@@ -250,8 +250,8 @@ export default function SearchInput({
             dropdownRef={typeDropdownRef}
             ariaLabel="Filter by data type"
           >
-            <div className="absolute bottom-full left-0 z-50 mb-1.5 min-w-[180px] rounded-xl border border-white/15 bg-[#1a1a1a] p-1.5 shadow-lg">
-              <div className="mb-1.5 flex gap-1 border-b border-white/10 pb-1.5">
+            <div className="absolute bottom-full left-0 z-50 mb-1.5 min-w-[180px] rounded-xl border border-black/10 bg-white p-1.5 shadow-lg dark:border-white/15 dark:bg-[#1a1a1a]">
+              <div className="mb-1.5 flex gap-1 border-b border-black/10 pb-1.5 dark:border-white/10">
                 <button
                   type="button"
                   onClick={() => {
@@ -259,7 +259,7 @@ export default function SearchInput({
                     setSelectedTypes(next);
                     if (mode === "explorer") applyToUrl(query, next);
                   }}
-                  className="rounded-full px-3 py-1 text-xs font-medium text-white/80 hover:bg-white/10 hover:text-white"
+                  className="rounded-full px-3 py-1 text-xs font-medium text-foreground/80 hover:bg-black/10 hover:text-foreground dark:text-white/80 dark:hover:bg-white/10 dark:hover:text-white"
                 >
                   All
                 </button>
@@ -270,7 +270,7 @@ export default function SearchInput({
                     setSelectedTypes(next);
                     if (mode === "explorer") applyToUrl(query, next);
                   }}
-                  className="rounded-full px-3 py-1 text-xs font-medium text-white/80 hover:bg-white/10 hover:text-white"
+                  className="rounded-full px-3 py-1 text-xs font-medium text-foreground/80 hover:bg-black/10 hover:text-foreground dark:text-white/80 dark:hover:bg-white/10 dark:hover:text-white"
                 >
                   None
                 </button>
@@ -282,13 +282,13 @@ export default function SearchInput({
                     key={filter.id}
                     type="button"
                     onClick={() => toggleType(filter.id)}
-                    className="flex w-full items-center gap-2 rounded-full px-3 py-1.5 text-sm text-white/90 transition hover:bg-white/10"
+                    className="flex w-full items-center gap-2 rounded-full px-3 py-1.5 text-sm text-foreground/90 transition hover:bg-black/10 dark:text-white/90 dark:hover:bg-white/10"
                   >
                     <span
                       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                         isSelected
                           ? "border-[#9AB07F] bg-[#9AB07F]"
-                          : "border-white/30 bg-transparent"
+                          : "border-foreground/30 bg-transparent dark:border-white/30"
                       }`}
                     >
                       {isSelected ? (
@@ -311,7 +311,7 @@ export default function SearchInput({
           } ${
             query.trim()
               ? "bg-[#9AB07F] text-white hover:bg-[#8a9f6f]"
-              : "bg-white/5 text-white/50"
+              : "bg-black/10 text-foreground/50 dark:bg-white/5 dark:text-white/50"
           }`}
           aria-label="Search"
         >

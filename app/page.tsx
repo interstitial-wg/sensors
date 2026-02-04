@@ -9,7 +9,7 @@ import FooterStats from "@/components/FooterStats";
 export default function Home() {
   return (
     <StatsProvider>
-      <div className="relative flex h-screen min-h-screen flex-col bg-[#1a1a1a] text-white">
+      <div className="relative flex h-screen min-h-screen flex-col bg-background text-foreground">
         {/* Main content area */}
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
           {/* Header - Sensors dropdown */}
@@ -30,7 +30,7 @@ export default function Home() {
               }}
             >
               {/* Body text - pt-16 pushes below fade zone so text isn't faded on load */}
-              <div className="max-w-md space-y-4 pt-16 text-base leading-relaxed text-white/80 md:text-lg lg:text-2xl">
+              <div className="max-w-md space-y-4 pt-16 text-base leading-relaxed text-foreground/80 md:text-lg lg:text-2xl">
                 <p>
                   Sensors is an exploration of the invisible infrastructure
                   measuring our built environment: weather stations, air quality
@@ -41,7 +41,7 @@ export default function Home() {
                   We&rsquo;re building{" "}
                   <a
                     href="https://atlas.planetary.software"
-                    className="text-white underline decoration-white/40 underline-offset-2 transition hover:decoration-white/80"
+                    className="text-foreground underline decoration-foreground/40 underline-offset-2 transition hover:decoration-foreground/80"
                   >
                     Atlas
                   </a>{" "}
@@ -51,7 +51,7 @@ export default function Home() {
                 <p>
                   <a
                     href="https://interstitial.systems"
-                    className="text-white underline decoration-white/40 underline-offset-2 transition hover:decoration-white/80"
+                    className="text-foreground underline decoration-foreground/40 underline-offset-2 transition hover:decoration-foreground/80"
                   >
                     Interstitial Systems
                   </a>{" "}
@@ -77,7 +77,7 @@ export default function Home() {
           </header>
 
           {/* Right 50%: dot grid with footer aligned to grid width (hidden on small screens) */}
-          <div className="hidden h-full min-h-0 flex-col overflow-hidden bg-[#1a1a1a] md:flex md:w-1/2">
+          <div className="hidden h-full min-h-0 flex-col overflow-hidden bg-background md:flex md:w-1/2">
             <DotGridSection />
           </div>
         </div>

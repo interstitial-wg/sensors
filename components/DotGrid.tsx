@@ -160,7 +160,7 @@ const Dot = React.memo(function Dot({
         width: dotSize,
         height: dotSize,
         backgroundColor: bgColor,
-        border: showOutline ? "1.5px solid rgba(255, 255, 255, 0.9)" : "none",
+        border: showOutline ? "1.5px solid var(--dot-outline)" : "none",
         boxSizing: "border-box",
         animationDelay:
           twinkle && !isHovered && !isClicked

@@ -96,10 +96,10 @@ export default function HomeSearchSection() {
 
   return (
     <div className="mt-8 space-y-6">
-      <p className="text-base leading-relaxed text-white/80 md:text-lg lg:text-2xl">
+      <p className="text-base leading-relaxed text-foreground/80 md:text-lg lg:text-2xl">
         <a
           href="/explorer"
-          className="font-medium text-white underline decoration-white/40 underline-offset-2 transition hover:decoration-white/80"
+          className="font-medium text-foreground underline decoration-foreground/40 underline-offset-2 transition hover:decoration-foreground/80"
         >
           Explore
         </a>{" "}

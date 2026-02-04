@@ -12,10 +12,11 @@ import type { FeatureCollection } from "geojson";
 import type { Sensor } from "@/lib/types";
 import type { Bounds } from "@/lib/types";
 import SensorHoverCard from "./SensorHoverCard";
+import { useTheme } from "@/components/ThemeProvider";
 
-// Carto Dark Matter – dark basemap to match the UI
+// Carto basemaps – dark for dark mode, light for light mode
 // If tiles don’t load, switch back to: https://tile.openstreetmap.org/{z}/{x}/{y}.png
-const MAP_STYLE = {
+const MAP_STYLE_DARK = {
   version: 8 as const,
   sources: {
     basemap: {
@@ -24,6 +25,31 @@ const MAP_STYLE = {
         "https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
         "https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
         "https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+      ],
+      tileSize: 256,
+      attribution: "© CARTO © OSM",
+    },
+  },
+  layers: [
+    {
+      id: "basemap",
+      type: "raster" as const,
+      source: "basemap",
+      minzoom: 0,
+      maxzoom: 20,
+    },
+  ],
+};
+
+const MAP_STYLE_LIGHT = {
+  version: 8 as const,
+  sources: {
+    basemap: {
+      type: "raster" as const,
+      tiles: [
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
       ],
       tileSize: 256,
       attribution: "© CARTO © OSM",
@@ -89,6 +115,8 @@ export default function SensorMap({
   fitToLocationZoom = 11,
   focusSensorId = null,
 }: SensorMapProps) {
+  const { theme } = useTheme();
+  const mapStyle = theme === "light" ? MAP_STYLE_LIGHT : MAP_STYLE_DARK;
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const hasFocusedRef = useRef(false);
   const [hoveredSensor, setHoveredSensor] = useState<Sensor | null>(null);
@@ -291,7 +319,7 @@ export default function SensorMap({
           bearing: 0,
         }}
         style={{ width: "100%", height: "100%" }}
-        mapStyle={MAP_STYLE}
+        mapStyle={mapStyle}
         onLoad={handleLoad}
         onMoveEnd={handleMoveEnd}
         onClick={handleMapClick}
