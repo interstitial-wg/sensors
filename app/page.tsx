@@ -1,7 +1,8 @@
+import { Suspense } from "react";
 import DotGridSection from "@/components/DotGridSection";
 import { NavDropdown } from "@/components/NavDropdown";
 import StatusIndicator from "@/components/StatusIndicator";
-import SearchInput from "@/components/SearchInput";
+import HomeSearchSection from "@/components/HomeSearchSection";
 import { StatsProvider } from "@/components/StatsProvider";
 import FooterStats from "@/components/FooterStats";
 
@@ -63,18 +64,9 @@ export default function Home() {
               </div>
 
               {/* Explore section - intro text + search input */}
-              <div className="mt-8 space-y-6">
-                <p className="text-base leading-relaxed text-white/80 md:text-lg lg:text-2xl">
-                  <a
-                    href="/explorer"
-                    className="font-medium text-white underline decoration-white/40 underline-offset-2 transition hover:decoration-white/80"
-                  >
-                    Explore
-                  </a>{" "}
-                  the sensors network below.
-                </p>
-                <SearchInput />
-              </div>
+              <Suspense fallback={<div className="mt-8 h-24" />}>
+                <HomeSearchSection />
+              </Suspense>
             </div>
 
             {/* Footer - visible only on small screens (dots hidden) */}

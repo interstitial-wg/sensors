@@ -17,6 +17,10 @@ function formatMeasurementKey(key: string): string {
     wind_speed_mps: "Wind",
     wind_direction_deg: "Wind dir",
     aqi: "AQI",
+    wave_height_m: "Wave height",
+    water_temperature_c: "Water temp",
+    dissolved_oxygen_mg_per_l: "Dissolved O₂",
+    turbidity_ntu: "Turbidity",
   };
   return known[key] ?? key.replace(/_/g, " ");
 }

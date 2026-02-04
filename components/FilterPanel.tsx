@@ -7,7 +7,7 @@ export interface FilterPanelProps {
   selectedTypes: Set<string>;
   onSelectedTypesChange: (selected: Set<string>) => void;
   isLoading?: boolean;
-  variant?: "default" | "toolbar";
+  variant?: "default" | "toolbar" | "mapOverlay";
 }
 
 const SENSOR_TYPE_LABELS: Record<string, string> = {
@@ -38,7 +38,7 @@ export default function FilterPanel({
       }
       onSelectedTypesChange(next);
     },
-    [selectedTypes, onSelectedTypesChange]
+    [selectedTypes, onSelectedTypesChange],
   );
 
   const selectAll = useCallback(() => {
@@ -50,15 +50,28 @@ export default function FilterPanel({
   }, [onSelectedTypesChange]);
 
   const isToolbar = variant === "toolbar";
+  const isMapOverlay = variant === "mapOverlay";
 
-  if (isToolbar) {
+  if (isToolbar || isMapOverlay) {
     return (
       <aside className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        <span
+          className={
+            isMapOverlay
+              ? "text-xs font-semibold uppercase tracking-wide text-white/60"
+              : "text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400"
+          }
+        >
           Filter by sensor type
         </span>
         {isLoading ? (
-          <span className="text-xs text-zinc-500">Loading types…</span>
+          <span
+            className={
+              isMapOverlay ? "text-xs text-white/50" : "text-xs text-zinc-500"
+            }
+          >
+            Loading types…
+          </span>
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -73,7 +86,13 @@ export default function FilterPanel({
                     onChange={() => toggle(type)}
                     className="h-3.5 w-3.5 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 dark:border-zinc-600 dark:bg-zinc-800"
                   />
-                  <span className="text-zinc-800 dark:text-zinc-200">
+                  <span
+                    className={
+                      isMapOverlay
+                        ? "text-white/90"
+                        : "text-zinc-800 dark:text-zinc-200"
+                    }
+                  >
                     {labelForType(type)}
                   </span>
                 </label>
@@ -83,14 +102,22 @@ export default function FilterPanel({
               <button
                 type="button"
                 onClick={selectAll}
-                className="rounded bg-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                className={
+                  isMapOverlay
+                    ? "rounded bg-white/10 px-2 py-1 text-xs font-medium text-white/90 hover:bg-white/15"
+                    : "rounded bg-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                }
               >
                 All
               </button>
               <button
                 type="button"
                 onClick={clearAll}
-                className="rounded bg-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                className={
+                  isMapOverlay
+                    ? "rounded bg-white/10 px-2 py-1 text-xs font-medium text-white/90 hover:bg-white/15"
+                    : "rounded bg-zinc-200 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                }
               >
                 Clear
               </button>

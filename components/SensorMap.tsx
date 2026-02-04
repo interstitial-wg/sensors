@@ -13,7 +13,7 @@ import type { Sensor } from "@/lib/types";
 import type { Bounds } from "@/lib/types";
 import SensorHoverCard from "./SensorHoverCard";
 
-// Carto Positron – light, minimal basemap with labels (roads, places)
+// Carto Dark Matter – dark basemap to match the UI
 // If tiles don’t load, switch back to: https://tile.openstreetmap.org/{z}/{x}/{y}.png
 const MAP_STYLE = {
   version: 8 as const,
@@ -21,9 +21,9 @@ const MAP_STYLE = {
     basemap: {
       type: "raster" as const,
       tiles: [
-        "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-        "https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-        "https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+        "https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+        "https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+        "https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
       ],
       tileSize: 256,
       attribution: "© CARTO © OSM",
@@ -116,35 +116,18 @@ export default function SensorMap({
     return byId;
   }, [sensors]);
 
-  const handleLoad = useCallback(
-    (evt: {
-      target:
-        | MapRef
-        | {
-            getBounds: () => {
-              getWest: () => number;
-              getSouth: () => number;
-              getEast: () => number;
-              getNorth: () => number;
-            };
-          };
-    }) => {
-      const target = evt.target;
-      const map =
-        typeof (target as MapRef).getMap === "function"
-          ? (target as MapRef).getMap()
-          : target;
-      if (!map || typeof map.getBounds !== "function") return;
-      const b = map.getBounds();
-      onBoundsChange?.({
-        west: b.getWest(),
-        south: b.getSouth(),
-        east: b.getEast(),
-        north: b.getNorth(),
-      });
-    },
-    [onBoundsChange],
-  );
+  const handleLoad = useCallback(() => {
+    // Use ref for reliability; evt.target may differ across react-map-gl versions
+    const map = mapRef.current?.getMap();
+    if (!map || typeof map.getBounds !== "function") return;
+    const b = map.getBounds();
+    onBoundsChange?.({
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+    });
+  }, [onBoundsChange]);
 
   const handleMoveEnd = useCallback(() => {
     const map = mapRef.current?.getMap();
