@@ -32,6 +32,8 @@ const DATA_TYPE_KEYWORDS: { pattern: RegExp | string; ids: string[] }[] = [
   { pattern: /\brivers?\b/i, ids: ["water_quality", "temperature"] },
   { pattern: /\bhumidity\b/i, ids: ["humidity"] },
   { pattern: /\btemperature\b/i, ids: ["temperature"] },
+  { pattern: /\btempature\b/i, ids: ["temperature"] },
+  { pattern: /\btempate\b/i, ids: ["temperature"] },
   { pattern: /\btemp\b/i, ids: ["temperature"] },
   { pattern: /\bweather\b/i, ids: ["temperature", "wind"] },
   { pattern: /\bwind\b/i, ids: ["wind"] },
@@ -76,6 +78,13 @@ const LOCATION_FALLBACKS: Record<string, string> = {
   "san francisco hays valley": "Hayes Valley, San Francisco",
   "hays valley san francisco": "Hayes Valley, San Francisco",
   "sf hayes valley": "Hayes Valley, San Francisco",
+  "san francico": "San Francisco",
+  "san francico ca": "San Francisco",
+  "san francico, ca": "San Francisco",
+  "san dieago": "San Diego",
+  "san dieago ca": "San Diego",
+  "los angelas": "Los Angeles",
+  "los angelas ca": "Los Angeles",
 };
 
 /**
@@ -181,8 +190,34 @@ export function parseQuery(query: string): ParsedQuery {
   };
 }
 
-/** Get a geocoding fallback for a location that may not resolve (e.g. "San Francisco Hays Valley" -> "Hayes Valley, San Francisco") */
+/** Get a geocoding fallback for a location that may not resolve (e.g. "San Francico" -> "San Francisco") */
 export function getLocationGeocodeFallback(location: string): string | null {
   const key = location.trim().toLowerCase().replace(/\s+/g, " ");
   return LOCATION_FALLBACKS[key] ?? null;
+}
+
+/** Common typos for known places - used to correct before geocoding */
+const LOCATION_TYPOS: Record<string, string> = {
+  "san francico": "san francisco",
+  "san dieago": "san diego",
+  "los angelas": "los angeles",
+  "los angles": "los angeles",
+  oaklnad: "oakland",
+  seattel: "seattle",
+};
+
+/** Correct obvious typos in a location string before geocoding */
+export function correctLocationTypo(location: string): string {
+  const lower = location.trim().toLowerCase();
+  for (const [typo, correct] of Object.entries(LOCATION_TYPOS)) {
+    if (lower.includes(typo) || lower === typo) {
+      const re = new RegExp(typo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+      return location.replace(re, (m) =>
+        m[0] === m[0].toUpperCase()
+          ? correct.charAt(0).toUpperCase() + correct.slice(1)
+          : correct,
+      );
+    }
+  }
+  return location;
 }

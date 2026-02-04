@@ -296,9 +296,8 @@ function mockReadingForSensor(sensor: Sensor): LatestReadingResponse {
 
 /**
  * Fetch the latest reading for a sensor.
- * GET /api/v1/sensors/:id/readings/latest.
- * Returns null when using placeholder data or when the API returns 404.
- * In placeholder mode, returns mock reading data.
+ * In the browser, uses our proxy (/api/sensors/:id/readings/latest) to avoid 404 console spam
+ * when the upstream API does not support readings. Returns null when no reading is available.
  */
 export async function getLatestReading(
   sensorId: string,
@@ -310,11 +309,17 @@ export async function getLatestReading(
   if (noReadingCache.has(sensorId)) {
     return null;
   }
-  const url = `${API_BASE}/api/v1/sensors/${encodeURIComponent(sensorId)}/readings/latest`;
+
+  const inBrowser = typeof window !== "undefined";
+  const url = inBrowser
+    ? `/api/sensors/${encodeURIComponent(sensorId)}/readings/latest`
+    : `${API_BASE}/api/v1/sensors/${encodeURIComponent(sensorId)}/readings/latest`;
+
   const res = await fetch(url, {
-    headers: { "x-api-key": getApiKey() },
+    headers: inBrowser ? {} : { "x-api-key": getApiKey() },
     cache: "no-store",
   });
+
   if (res.status === 404) {
     if (noReadingCache.size >= MAX_NO_READING_CACHE) {
       noReadingCache.clear();
@@ -323,7 +328,16 @@ export async function getLatestReading(
     return null;
   }
   if (!res.ok) throw new Error(`Sensors API error: ${res.status}`);
-  return res.json() as Promise<LatestReadingResponse>;
+
+  const data = await res.json();
+  if (data == null) {
+    if (noReadingCache.size >= MAX_NO_READING_CACHE) {
+      noReadingCache.clear();
+    }
+    noReadingCache.add(sensorId);
+    return null;
+  }
+  return data as LatestReadingResponse;
 }
 
 /**

@@ -3,7 +3,11 @@
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import SearchInput from "@/components/SearchInput";
-import { parseQuery, getLocationGeocodeFallback } from "@/lib/query-parser";
+import {
+  parseQuery,
+  getLocationGeocodeFallback,
+  correctLocationTypo,
+} from "@/lib/query-parser";
 import { DATA_TYPE_IDS } from "@/lib/data-filters";
 
 /**
@@ -44,9 +48,11 @@ export default function HomeSearchSection() {
       }
       const location = parsed.location?.trim();
       if (location) {
-        const toTry = [location, getLocationGeocodeFallback(location)].filter(
-          Boolean,
-        ) as string[];
+        const corrected = correctLocationTypo(location);
+        const fallback = getLocationGeocodeFallback(location);
+        const toTry = [
+          ...new Set([corrected, location, fallback].filter(Boolean)),
+        ] as string[];
         for (const loc of toTry) {
           try {
             const res = await fetch(
@@ -57,10 +63,22 @@ export default function HomeSearchSection() {
                 lat: number;
                 lon: number;
                 display_name?: string;
+                boundingbox?: {
+                  south: number;
+                  north: number;
+                  west: number;
+                  east: number;
+                };
               } | null;
               if (data?.lat != null && data?.lon != null) {
                 params.set("lat", String(data.lat));
                 params.set("lon", String(data.lon));
+                if (data.boundingbox) {
+                  params.set("min_lat", String(data.boundingbox.south));
+                  params.set("max_lat", String(data.boundingbox.north));
+                  params.set("min_lon", String(data.boundingbox.west));
+                  params.set("max_lon", String(data.boundingbox.east));
+                }
                 break;
               }
             }

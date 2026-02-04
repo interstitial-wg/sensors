@@ -3,8 +3,12 @@
  */
 
 import { getLatestReading } from "./sensors-api";
+import type { LatestReadingResponse } from "./sensors-api";
 import type { Sensor } from "./types";
 import { parseQuery } from "./query-parser";
+
+/** Timeout per reading fetch so we don't hang on slow/unresponsive APIs */
+const READING_FETCH_TIMEOUT_MS = 12_000;
 
 /** Measurement keys we can average, grouped by data type */
 const MEASUREMENT_BY_DATA_TYPE: Record<string, string[]> = {
@@ -54,6 +58,7 @@ const SENSOR_TYPE_TO_DATA_TYPES: Record<string, string[]> = {
 /**
  * Build assistant reply: fetch readings for sensors, compute average, return formatted reply.
  * When requestedTypeNotAvailable is true, propose what IS available from nearby sensors.
+ * onPhase: optional callback to report progress ("gathering_data" | "computing").
  */
 export async function buildAssistantReply(
   sensors: Sensor[],
@@ -62,22 +67,40 @@ export async function buildAssistantReply(
   options?: {
     requestedTypeNotAvailable?: boolean;
     requestedDataTypes?: Set<string>;
+    onPhase?: (phase: "gathering_data" | "computing") => void;
   },
 ): Promise<string> {
+  console.log("[buildAssistantReply] start", {
+    sensorCount: sensors.length,
+    userQuery,
+    hasError: !!error,
+  });
   if (error) {
     return `Sorry, something went wrong: ${error}`;
   }
   const count = sensors.length;
   if (count === 0) {
+    console.log("[buildAssistantReply] early return: no sensors");
     return `No sensors found${userQuery ? ` for "${userQuery}"` : ""}. Try a different location or filter.`;
   }
 
   const requestedTypeNotAvailable = options?.requestedTypeNotAvailable ?? false;
   const requestedDataTypes = options?.requestedDataTypes;
-  if (requestedTypeNotAvailable && requestedDataTypes && requestedDataTypes.size > 0) {
+  if (
+    requestedTypeNotAvailable &&
+    requestedDataTypes &&
+    requestedDataTypes.size > 0
+  ) {
     const requestedLabels = [...requestedDataTypes]
       .map((id) => {
-        const f = { aqi: "AQI", temperature: "temperature", humidity: "humidity", wind: "wind", wave_height: "wave height", water_quality: "water quality" }[id];
+        const f = {
+          aqi: "AQI",
+          temperature: "temperature",
+          humidity: "humidity",
+          wind: "wind",
+          wave_height: "wave height",
+          water_quality: "water quality",
+        }[id];
         return f ?? id;
       })
       .join(", ");
@@ -88,18 +111,27 @@ export async function buildAssistantReply(
       if (types) available.push(...types);
     }
     const uniqueAvailable = [...new Set(available)];
-    const availableStr = uniqueAvailable.length > 0 ? uniqueAvailable.join(", ") : "various measurements";
+    const availableStr =
+      uniqueAvailable.length > 0
+        ? uniqueAvailable.join(", ")
+        : "various measurements";
+    console.log(
+      "[buildAssistantReply] early return: requested type not available, suggesting alternatives",
+    );
     const lines: string[] = [
       `No ${requestedLabels} sensors in this area.`,
       `Nearby sensors (${count} found) measure: ${availableStr}.`,
       "",
-      ...sensors.slice(0, 5).map((s) => `• ${s.name} — ${s.sensor_type.replace(/_/g, " ")}`),
+      ...sensors
+        .slice(0, 5)
+        .map((s) => `• ${s.name} — ${s.sensor_type.replace(/_/g, " ")}`),
     ];
     if (count > 5) lines.push(`… and ${count - 5} more on the map`);
     return lines.join("\n");
   }
 
   const parsed = parseQuery(userQuery);
+  const requestedFromQuery = new Set(parsed.dataTypeIds);
   let dataTypeIds = parsed.dataTypeIds;
   if (dataTypeIds.size === 0) {
     const sensorTypes = new Set(sensors.map((s) => s.sensor_type));
@@ -123,25 +155,70 @@ export async function buildAssistantReply(
   }
   const uniqueKeys = [...new Set(measurementKeys)];
 
-  const topSensors = sensors.slice(0, 10);
-  const readings = await Promise.all(
-    topSensors.map((s) => getLatestReading(s.id)),
+  options?.onPhase?.("gathering_data");
+  const sensorsToQuery = sensors;
+  console.log(
+    "[buildAssistantReply] phase: gathering_data, fetching readings for",
+    sensorsToQuery.length,
+    "sensors",
   );
+  const fetchWithTimeout = (sensorId: string) =>
+    Promise.race([
+      getLatestReading(sensorId),
+      new Promise<LatestReadingResponse | null>((resolve) =>
+        setTimeout(() => resolve(null), READING_FETCH_TIMEOUT_MS),
+      ),
+    ]);
+  const readings = await Promise.all(
+    sensorsToQuery.map((s) => fetchWithTimeout(s.id)),
+  );
+
+  const respondedCount = readings.filter(
+    (r) => r?.reading?.measurements != null,
+  ).length;
+  console.log("[buildAssistantReply] readings fetched", {
+    queried: sensorsToQuery.length,
+    respondedWithData: respondedCount,
+  });
+
+  options?.onPhase?.("computing");
+
+  const unitByKey: Record<string, string> = {
+    air_temperature_c: "°C",
+    water_temperature_c: "°C",
+    aqi: "",
+    relative_humidity_percent: "%",
+    wind_speed_mps: " m/s",
+    wave_height_m: " m",
+    dissolved_oxygen_mg_per_l: " mg/L",
+    turbidity_ntu: " NTU",
+  };
+
+  const allMeasurementKeys = [
+    "air_temperature_c",
+    "water_temperature_c",
+    "aqi",
+    "relative_humidity_percent",
+    "wind_speed_mps",
+    "wave_height_m",
+    "dissolved_oxygen_mg_per_l",
+    "turbidity_ntu",
+  ];
 
   const valuesByKey: Record<
     string,
     { sum: number; count: number; sensorNames: string[] }
   > = {};
-  for (const key of uniqueKeys) {
+  for (const key of allMeasurementKeys) {
     valuesByKey[key] = { sum: 0, count: 0, sensorNames: [] };
   }
 
-  for (let i = 0; i < topSensors.length; i++) {
-    const sensor = topSensors[i];
+  for (let i = 0; i < sensorsToQuery.length; i++) {
+    const sensor = sensorsToQuery[i];
     const reading = readings[i];
     if (!reading?.reading?.measurements) continue;
     const m = reading.reading.measurements as Record<string, unknown>;
-    for (const key of uniqueKeys) {
+    for (const key of allMeasurementKeys) {
       const val = extractNumericValue(m, [key]);
       if (val != null) {
         valuesByKey[key].sum += val;
@@ -155,54 +232,93 @@ export async function buildAssistantReply(
     label: string;
     value: number;
     unit: string;
-    sensorNames: string[];
+    key: string;
+    sensorCount: number;
   }[] = [];
-  const unitByKey: Record<string, string> = {
-    air_temperature_c: "°C",
-    water_temperature_c: "°C",
-    aqi: "",
-    relative_humidity_percent: "%",
-    wind_speed_mps: " m/s",
-    wave_height_m: " m",
-    dissolved_oxygen_mg_per_l: " mg/L",
-    turbidity_ntu: " NTU",
-  };
   for (const key of uniqueKeys) {
-    const { sum, count, sensorNames } = valuesByKey[key];
+    const { sum, count } = valuesByKey[key];
     if (count > 0) {
       const avg = sum / count;
       const label = MEASUREMENT_LABELS[key] ?? key;
       const unit = unitByKey[key] ?? "";
-      averages.push({ label, value: avg, unit, sensorNames });
+      averages.push({ label, value: avg, unit, key, sensorCount: count });
     }
   }
 
-  const lines: string[] = [];
-  lines.push(
-    `Found ${count} sensor${count === 1 ? "" : "s"}${userQuery ? ` for "${userQuery}"` : ""}.`,
-  );
-  lines.push("");
+  const availableAverages: {
+    label: string;
+    value: number;
+    unit: string;
+    sensorCount: number;
+  }[] = [];
+  for (const key of allMeasurementKeys) {
+    const { sum, count } = valuesByKey[key];
+    if (count > 0) {
+      const avg = sum / count;
+      const label = MEASUREMENT_LABELS[key] ?? key;
+      const unit = unitByKey[key] ?? "";
+      availableAverages.push({ label, value: avg, unit, sensorCount: count });
+    }
+  }
 
-  if (averages.length > 0) {
-    for (const { label, value, unit, sensorNames } of averages) {
+  const requestedLabels = [...requestedFromQuery]
+    .map(
+      (id) =>
+        ({
+          aqi: "air quality (AQI)",
+          temperature: "temperature",
+          humidity: "humidity",
+          wind: "wind",
+          wave_height: "wave height",
+          water_quality: "water quality",
+        })[id] ?? id,
+    )
+    .filter(Boolean);
+
+  const requestedButNotAvailable =
+    requestedFromQuery.size > 0 &&
+    averages.length === 0 &&
+    availableAverages.length > 0;
+
+  const locationPhrase = parsed.location
+    ? ` in ${parsed.location}`
+    : " in this area";
+
+  const lines: string[] = [];
+
+  if (requestedButNotAvailable) {
+    lines.push(
+      `No ${requestedLabels.join(" or ")} sensors${locationPhrase}. The sensors here measure ${availableAverages.map((a) => a.label).join(", ")}.`,
+    );
+    for (const { label, value, unit, sensorCount } of availableAverages) {
       const formatted = Number.isInteger(value)
         ? String(value)
         : value.toFixed(1);
-      const uniqueNames = [...new Set(sensorNames)];
       lines.push(
-        `Based on ${uniqueNames.slice(0, 5).join(", ")}${uniqueNames.length > 5 ? ` and ${uniqueNames.length - 5} more` : ""}, the average ${label} appears to be ${formatted}${unit}.`,
+        `We found that among ${sensorCount} sensors, the average **${label}** is **${formatted}${unit}**.`,
       );
     }
-    lines.push("");
+  } else if (averages.length > 0) {
+    for (const { label, value, unit, sensorCount } of averages) {
+      const formatted = Number.isInteger(value)
+        ? String(value)
+        : value.toFixed(1);
+      lines.push(
+        `We found that among ${sensorCount} sensors, the average **${label}** is **${formatted}${unit}**.`,
+      );
+    }
+  } else if (respondedCount === 0) {
+    lines.push(
+      "No readings available. The sensors API may not expose /readings/latest for these sensors.",
+    );
+  } else {
+    lines.push("No readings available for the requested measurements.");
   }
 
-  const toList = sensors.slice(0, 5);
-  lines.push(
-    ...toList.map((s) => `• ${s.name} — ${s.sensor_type.replace(/_/g, " ")}`),
-  );
-  if (count > 5) {
-    lines.push(`… and ${count - 5} more on the map`);
-  }
-
-  return lines.join("\n");
+  const result = lines.join("\n");
+  console.log("[buildAssistantReply] done", {
+    lineCount: lines.length,
+    resultPreview: result.slice(0, 100),
+  });
+  return result;
 }

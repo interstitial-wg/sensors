@@ -68,8 +68,12 @@ const SENSORS_LAYER_ID = "sensors-circles";
 export interface SensorMapProps {
   sensors: Sensor[];
   onBoundsChange?: (bounds: Bounds) => void;
-  /** Increment to trigger fitBounds to all sensors with coords. */
+  /** Increment to trigger fitBounds. When fitToLocation is set, fits to that; else fits to sensors. */
   fitToSensorsTrigger?: number;
+  /** When set (e.g. from location search), fit map to this area instead of all sensors. Prevents zoom-out. */
+  fitToLocation?: Bounds | null;
+  /** When set with fitToLocation, use this zoom level. Default 11 (city scale). */
+  fitToLocationZoom?: number;
   /** When set, fit map to this sensor and show its popup. Sensor must be in sensors array. */
   focusSensorId?: string | null;
 }
@@ -78,6 +82,8 @@ export default function SensorMap({
   sensors,
   onBoundsChange,
   fitToSensorsTrigger = 0,
+  fitToLocation = null,
+  fitToLocationZoom = 11,
   focusSensorId = null,
 }: SensorMapProps) {
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
@@ -180,11 +186,28 @@ export default function SensorMap({
     [sensorsById],
   );
 
-  // Fit map to all sensors when parent triggers (e.g. "Fit map to all sensors" button)
+  // Fit map when parent triggers. Prefer location (city/bbox) over sensors.
+  const lastFittedTriggerRef = useRef(0);
   useEffect(() => {
-    if (fitToSensorsTrigger <= 0 || withCoords.length === 0) return;
+    if (fitToSensorsTrigger <= 0) return;
     const map = mapRef.current?.getMap();
     if (!map || typeof map.fitBounds !== "function") return;
+
+    if (fitToLocation) {
+      // Only fit once per trigger - don't re-run when sensors load progressively
+      if (lastFittedTriggerRef.current === fitToSensorsTrigger) return;
+      lastFittedTriggerRef.current = fitToSensorsTrigger;
+      map.fitBounds(
+        [
+          [fitToLocation.west, fitToLocation.south],
+          [fitToLocation.east, fitToLocation.north],
+        ],
+        { padding: 48, maxZoom: fitToLocationZoom, duration: 250 },
+      );
+      return;
+    }
+
+    if (withCoords.length === 0) return;
     const lngs = withCoords.map((s) => s.longitude);
     const lats = withCoords.map((s) => s.latitude);
     const west = Math.min(...lngs);
@@ -196,9 +219,9 @@ export default function SensorMap({
         [west, south],
         [east, north],
       ],
-      { padding: 48, maxZoom: 12, duration: 800 },
+      { padding: 48, maxZoom: 12, duration: 250 },
     );
-  }, [fitToSensorsTrigger, withCoords]);
+  }, [fitToSensorsTrigger, withCoords, fitToLocation, fitToLocationZoom]);
 
   // Fit map to and select a specific sensor (e.g. from ?sensor=id in URL)
   useEffect(() => {
@@ -214,7 +237,7 @@ export default function SensorMap({
         [sensor.longitude - pad, sensor.latitude - pad],
         [sensor.longitude + pad, sensor.latitude + pad],
       ],
-      { padding: 48, maxZoom: 14, duration: 800 },
+      { padding: 48, maxZoom: 14, duration: 250 },
     );
     setSelectedSensor(sensor);
     setHoveredSensor(sensor);
@@ -256,7 +279,7 @@ export default function SensorMap({
               "circle-stroke-color": "rgba(255,255,255,0.9)",
             }}
           />
-          {/* Highlighted dot for selected/focused sensor - makes location obvious */}
+          {/* Highlighted dot for selected/focused sensor - uses site green (#9ab07f) */}
           {selectedSensor && (
             <Layer
               id="sensors-selected-highlight"
@@ -264,7 +287,7 @@ export default function SensorMap({
               filter={["==", ["get", "id"], selectedSensor.id]}
               paint={{
                 "circle-radius": 10,
-                "circle-color": "#22c55e",
+                "circle-color": "#9ab07f",
                 "circle-stroke-width": 3,
                 "circle-stroke-color": "#ffffff",
               }}
@@ -282,31 +305,17 @@ export default function SensorMap({
               closeOnClick={false}
               className="sensor-map-popup-minimal"
             >
-              <div className="min-w-[140px]">
-                <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                  {selectedSensor.name}
-                </div>
-                <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                  {selectedSensor.sensor_type.replace(/_/g, " ")}
-                  {selectedSensor.provider_name && (
-                    <> · {selectedSensor.provider_name}</>
-                  )}
-                </div>
-                {selectedSensor.description && (
-                  <p className="mt-1.5 line-clamp-2 text-xs text-zinc-600 dark:text-zinc-300">
-                    {selectedSensor.description}
-                  </p>
-                )}
-              </div>
+              <div className="min-w-[100px] min-h-[32px]" aria-hidden />
             </Popup>
           )}
       </Map>
-      {hoveredSensor && (
+      {/* Card anchored to right: hover preview or full details when selected */}
+      {(hoveredSensor || selectedSensor) && (
         <div className="absolute bottom-20 right-4 z-20">
           <SensorHoverCard
-            key={hoveredSensor.id}
-            sensor={hoveredSensor}
-            shouldFetchReading={selectedSensor?.id === hoveredSensor.id}
+            key={(selectedSensor ?? hoveredSensor)!.id}
+            sensor={selectedSensor ?? hoveredSensor!}
+            shouldFetchReading={selectedSensor != null}
           />
         </div>
       )}

@@ -7,7 +7,10 @@ import ExplorerChatPanel from "@/components/ExplorerChatPanel";
 import { NavDropdown } from "@/components/NavDropdown";
 import { getSensors, getSensorTypes, getSensor } from "@/lib/sensors-api";
 import { dataTypesToSensorTypes, DATA_TYPE_IDS } from "@/lib/data-filters";
-import { getLocationGeocodeFallback } from "@/lib/query-parser";
+import {
+  getLocationGeocodeFallback,
+  correctLocationTypo,
+} from "@/lib/query-parser";
 import {
   boundsContained,
   boundsToFetchSegments,
@@ -36,8 +39,10 @@ const PROGRESSIVE_CHUNK_SIZE = 200;
 const BBOX_CONCURRENCY = 4;
 /** Cap radius pagination so we don't run unbounded requests. */
 const RADIUS_MAX_PAGES = 5;
-/** Radius (km) when searching by location from query (e.g. "Oakland") */
-const LOCATION_RADIUS_KM = 80;
+/** Radius tiers for location search: start with city scale, expand if no sensors. */
+const LOCATION_RADIUS_INITIAL_KM = 8; // City scale (Oakland ~10km, SF ~11km)
+const LOCATION_RADIUS_TIER2_KM = 25; // Metro area
+const LOCATION_RADIUS_TIER3_KM = 80; // Regional (e.g. Bay Area)
 
 /** Run async tasks with a concurrency limit; returns results in task order. */
 async function runWithConcurrency<T>(
@@ -68,6 +73,10 @@ export default function ExplorerClient() {
   const providerParam = searchParams.get("provider")?.trim() ?? null;
   const locationLatParam = searchParams.get("lat");
   const locationLonParam = searchParams.get("lon");
+  const locationMinLatParam = searchParams.get("min_lat");
+  const locationMaxLatParam = searchParams.get("max_lat");
+  const locationMinLonParam = searchParams.get("min_lon");
+  const locationMaxLonParam = searchParams.get("max_lon");
   const hasLocationCoords =
     locationLatParam != null &&
     locationLonParam != null &&
@@ -77,6 +86,26 @@ export default function ExplorerClient() {
     locationLatParam != null ? parseFloat(locationLatParam) : null;
   const locationLon =
     locationLonParam != null ? parseFloat(locationLonParam) : null;
+  const hasLocationBbox =
+    locationMinLatParam != null &&
+    locationMaxLatParam != null &&
+    locationMinLonParam != null &&
+    locationMaxLonParam != null &&
+    !Number.isNaN(parseFloat(locationMinLatParam)) &&
+    !Number.isNaN(parseFloat(locationMaxLatParam)) &&
+    !Number.isNaN(parseFloat(locationMinLonParam)) &&
+    !Number.isNaN(parseFloat(locationMaxLonParam));
+  const locationBbox = hasLocationBbox
+    ? {
+        min_lat: parseFloat(locationMinLatParam!),
+        max_lat: parseFloat(locationMaxLatParam!),
+        min_lon: parseFloat(locationMinLonParam!),
+        max_lon: parseFloat(locationMaxLonParam!),
+      }
+    : null;
+  const locationBboxKey = locationBbox
+    ? `${locationBbox.min_lat}_${locationBbox.max_lat}_${locationBbox.min_lon}_${locationBbox.max_lon}`
+    : "";
   const initialTypes = useMemo(() => {
     if (!typeParam) return new Set<string>();
     return new Set(
@@ -111,6 +140,7 @@ export default function ExplorerClient() {
   const [fitToSensorsTrigger, setFitToSensorsTrigger] = useState(0);
   const [locationFetchUsedFallback, setLocationFetchUsedFallback] =
     useState(false);
+  const [isFindingLocation, setIsFindingLocation] = useState(false);
   const [focusSensor, setFocusSensor] = useState<Sensor | null>(null);
   const [progressiveVisibleCount, setProgressiveVisibleCount] = useState(0);
   const boundsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -199,10 +229,9 @@ export default function ExplorerClient() {
     const selectedTypesKey = [...selectedDataTypes].sort().join(",");
     const providerFilter = providerParam || undefined;
 
-    // Location-based fetch: when lat/lon in URL (from geocoded query), fetch by center+radius
-    // Do NOT pass search param - lat/lon defines the area; full query would filter out all sensors
+    // Location-based fetch: start with city boundaries (bbox) or small radius, expand if no sensors
     if (hasLocationCoords && locationLat != null && locationLon != null) {
-      const cacheKey = `loc_${locationLat}_${locationLon}_${selectedTypesKey}_${providerFilter ?? ""}`;
+      const cacheKey = `loc_${locationLat}_${locationLon}_${locationBboxKey}_${selectedTypesKey}_${providerFilter ?? ""}`;
       const cached = bboxCacheRef.current.get(cacheKey);
       if (cached !== undefined) {
         setAllSensors(cached);
@@ -213,7 +242,6 @@ export default function ExplorerClient() {
         setLocationFetchUsedFallback(
           locationCacheFallbackRef.current.get(cacheKey) ?? false,
         );
-        setFitToSensorsTrigger((t) => t + 1);
         return;
       }
 
@@ -227,27 +255,94 @@ export default function ExplorerClient() {
           ? [null as string | null]
           : sensorTypesToFetch;
 
+      async function fetchWithOpts(opts: {
+        min_lat?: number;
+        max_lat?: number;
+        min_lon?: number;
+        max_lon?: number;
+        lat?: number;
+        lon?: number;
+        radius_km?: number;
+        sensor_type?: string | null;
+      }): Promise<Sensor[]> {
+        const acc: Sensor[] = [];
+        const seen = new Set<string>();
+        for (const sensorType of typesToFetch) {
+          let page = 1;
+          while (page <= RADIUS_MAX_PAGES) {
+            const res = await getSensors({
+              limit: 500,
+              page,
+              ...opts,
+              ...(sensorType != null && { sensor_type: sensorType }),
+              ...(providerFilter && { provider: providerFilter }),
+            });
+            if (cancelled || myFetchId !== fetchIdRef.current) return [];
+            for (const s of res.sensors) {
+              if (!seen.has(s.id)) {
+                seen.add(s.id);
+                acc.push(s);
+              }
+            }
+            const hasMore =
+              res.sensors.length === 500 && page < res.pagination.total_pages;
+            if (!hasMore) break;
+            page += 1;
+          }
+        }
+        return acc;
+      }
+
       (async () => {
-        const accumulated: Sensor[] = [];
-        const seenIds = new Set<string>();
         try {
-          for (const sensorType of typesToFetch) {
+          let accumulated: Sensor[] = [];
+          let usedFallback = false;
+
+          // Tier 1: use radius from center (more reliable than Nominatim bbox for sensor APIs)
+          accumulated = await fetchWithOpts({
+            lat: locationLat,
+            lon: locationLon,
+            radius_km: LOCATION_RADIUS_INITIAL_KM,
+          });
+
+          // Tier 2: expand to 25km if no sensors
+          if (accumulated.length === 0) {
+            accumulated = await fetchWithOpts({
+              lat: locationLat,
+              lon: locationLon,
+              radius_km: LOCATION_RADIUS_TIER2_KM,
+            });
+            usedFallback = true;
+          }
+
+          // Tier 3: expand to 80km if still none
+          if (accumulated.length === 0) {
+            accumulated = await fetchWithOpts({
+              lat: locationLat,
+              lon: locationLon,
+              radius_km: LOCATION_RADIUS_TIER3_KM,
+            });
+          }
+
+          // Type fallback: if we had type filter and still 0, show all types in area
+          if (accumulated.length === 0 && typesToFetch.some((t) => t != null)) {
+            const fallbackAcc: Sensor[] = [];
+            const fallbackSeen = new Set<string>();
             let page = 1;
             while (page <= RADIUS_MAX_PAGES) {
               const res = await getSensors({
                 limit: 500,
                 lat: locationLat,
                 lon: locationLon,
-                radius_km: LOCATION_RADIUS_KM,
+                radius_km: LOCATION_RADIUS_TIER3_KM,
                 page,
-                ...(sensorType != null && { sensor_type: sensorType }),
                 ...(providerFilter && { provider: providerFilter }),
               });
               if (cancelled || myFetchId !== fetchIdRef.current) return;
               for (const s of res.sensors) {
-                if (!seenIds.has(s.id)) {
-                  seenIds.add(s.id);
-                  accumulated.push(s);
+                if (!fallbackSeen.has(s.id)) {
+                  fallbackSeen.add(s.id);
+                  fallbackAcc.push(s);
                 }
               }
               const hasMore =
@@ -255,35 +350,11 @@ export default function ExplorerClient() {
               if (!hasMore) break;
               page += 1;
             }
+            accumulated = fallbackAcc;
           }
-          let finalSensors = accumulated;
-          let usedFallback = false;
-          if (accumulated.length === 0 && typesToFetch.some((t) => t != null)) {
-            usedFallback = true;
-            const fallbackAcc: Sensor[] = [];
-            let page = 1;
-            while (page <= RADIUS_MAX_PAGES) {
-              const res = await getSensors({
-                limit: 500,
-                lat: locationLat,
-                lon: locationLon,
-                radius_km: LOCATION_RADIUS_KM,
-                page,
-                ...(providerFilter && { provider: providerFilter }),
-              });
-              if (cancelled || myFetchId !== fetchIdRef.current) return;
-              for (const s of res.sensors) {
-                if (!fallbackAcc.some((x) => x.id === s.id)) fallbackAcc.push(s);
-              }
-              const hasMore =
-                res.sensors.length === 500 && page < res.pagination.total_pages;
-              if (!hasMore) break;
-              page += 1;
-            }
-            finalSensors = fallbackAcc;
-          }
+
           if (myFetchId !== fetchIdRef.current) return;
-          const sorted = sortSensorsByCenter(finalSensors, {
+          const sorted = sortSensorsByCenter(accumulated, {
             lat: locationLat,
             lon: locationLon,
           });
@@ -296,7 +367,6 @@ export default function ExplorerClient() {
             const firstKey = bboxCacheRef.current.keys().next().value;
             if (firstKey != null) bboxCacheRef.current.delete(firstKey);
           }
-          setFitToSensorsTrigger((t) => t + 1);
         } catch (err) {
           if (myFetchId === fetchIdRef.current) {
             setSensorsError(
@@ -504,6 +574,7 @@ export default function ExplorerClient() {
     hasLocationCoords,
     locationLat,
     locationLon,
+    locationBboxKey,
   ]);
 
   const filteredByType = useMemo(() => {
@@ -547,68 +618,156 @@ export default function ExplorerClient() {
     }
   }, [progressiveVisibleCount, sensorsToShow.length]);
 
-  const handleBoundsChange = useCallback((b: Bounds) => {
-    setBounds(b);
-  }, []);
+  const handleBoundsChange = useCallback(
+    (b: Bounds) => {
+      // Skip bounds update when in location-search mode to avoid re-render loop:
+      // fitBounds -> onMoveEnd -> setBounds -> re-render -> effect re-runs -> fitBounds
+      if (hasLocationCoords) return;
+      setBounds(b);
+    },
+    [hasLocationCoords],
+  );
+
+  const fitToLocation = useMemo((): Bounds | null => {
+    if (!hasLocationCoords || locationLat == null || locationLon == null)
+      return null;
+    if (
+      hasLocationBbox &&
+      locationMinLatParam != null &&
+      locationMaxLatParam != null &&
+      locationMinLonParam != null &&
+      locationMaxLonParam != null
+    ) {
+      return {
+        west: parseFloat(locationMinLonParam),
+        south: parseFloat(locationMinLatParam),
+        east: parseFloat(locationMaxLonParam),
+        north: parseFloat(locationMaxLatParam),
+      };
+    }
+    const pad = 0.055;
+    return {
+      west: locationLon - pad,
+      south: locationLat - pad,
+      east: locationLon + pad,
+      north: locationLat + pad,
+    };
+  }, [
+    hasLocationCoords,
+    locationLat,
+    locationLon,
+    hasLocationBbox,
+    locationMinLatParam,
+    locationMaxLatParam,
+    locationMinLonParam,
+    locationMaxLonParam,
+  ]);
+
+  // Move map to location immediately when we have coords (don't wait for sensors)
+  const locationFitKey = hasLocationCoords
+    ? `${locationLat}_${locationLon}_${locationBboxKey}`
+    : null;
+  const lastFittedLocationRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!locationFitKey) return;
+    if (lastFittedLocationRef.current === locationFitKey) return;
+    lastFittedLocationRef.current = locationFitKey;
+    setFitToSensorsTrigger((t) => t + 1);
+  }, [locationFitKey]);
 
   const handleSearchSubmit = useCallback(
     async (query: string, selectedTypes: Set<string>) => {
-      const q = query.trim();
-      let parsed: { location?: string; dataTypeIds: string[] };
+      console.log("[ExplorerClient] handleSearchSubmit start", {
+        query: query.trim(),
+        selectedTypes: [...selectedTypes],
+      });
+      setIsFindingLocation(true);
       try {
-        const res = await fetch("/api/parse-query", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: q || "Show sensors" }),
-        });
-        parsed = await res.json();
-      } catch {
-        parsed = { dataTypeIds: [] };
-      }
-      const mergedTypes = new Set(selectedTypes);
-      for (const id of parsed.dataTypeIds ?? []) {
-        if (DATA_TYPE_IDS.has(id)) mergedTypes.add(id);
-      }
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("q");
-      params.delete("type");
-      params.delete("lat");
-      params.delete("lon");
-      if (q) params.set("q", q);
-      if (mergedTypes.size > 0 && mergedTypes.size < DATA_TYPE_IDS.size) {
-        params.set("type", [...mergedTypes].sort().join(","));
-      }
-      const location = parsed.location?.trim();
-      if (location) {
-        const toTry = [
-          location,
-          getLocationGeocodeFallback(location),
-        ].filter(Boolean) as string[];
-        for (const loc of toTry) {
-          try {
-            const res = await fetch(
-              `/api/geocode?q=${encodeURIComponent(loc)}&countrycodes=us`,
-            );
-            if (res.ok) {
-              const data = (await res.json()) as {
-                lat: number;
-                lon: number;
-                display_name?: string;
-              } | null;
-              if (data?.lat != null && data?.lon != null) {
-                params.set("lat", String(data.lat));
-                params.set("lon", String(data.lon));
-                break;
+        const q = query.trim();
+        let parsed: { location?: string; dataTypeIds: string[] };
+        try {
+          console.log("[ExplorerClient] calling parse-query API");
+          const res = await fetch("/api/parse-query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: q || "Show sensors" }),
+          });
+          parsed = await res.json();
+          console.log("[ExplorerClient] parse-query result", parsed);
+        } catch (e) {
+          console.log("[ExplorerClient] parse-query failed", e);
+          parsed = { dataTypeIds: [] };
+        }
+        const mergedTypes = new Set(selectedTypes);
+        for (const id of parsed.dataTypeIds ?? []) {
+          if (DATA_TYPE_IDS.has(id)) mergedTypes.add(id);
+        }
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("q");
+        params.delete("type");
+        params.delete("lat");
+        params.delete("lon");
+        params.delete("min_lat");
+        params.delete("max_lat");
+        params.delete("min_lon");
+        params.delete("max_lon");
+        // Don't add q to URL when submitting from explorer - keeps input cleared after submit
+        if (mergedTypes.size > 0 && mergedTypes.size < DATA_TYPE_IDS.size) {
+          params.set("type", [...mergedTypes].sort().join(","));
+        }
+        const location = parsed.location?.trim();
+        if (location) {
+          console.log("[ExplorerClient] geocoding location", location);
+          const corrected = correctLocationTypo(location);
+          const fallback = getLocationGeocodeFallback(location);
+          const toTry = [
+            ...new Set([corrected, location, fallback].filter(Boolean)),
+          ] as string[];
+          for (const loc of toTry) {
+            try {
+              const res = await fetch(
+                `/api/geocode?q=${encodeURIComponent(loc)}&countrycodes=us`,
+              );
+              if (res.ok) {
+                const data = (await res.json()) as {
+                  lat: number;
+                  lon: number;
+                  display_name?: string;
+                  boundingbox?: {
+                    south: number;
+                    north: number;
+                    west: number;
+                    east: number;
+                  };
+                } | null;
+                if (data?.lat != null && data?.lon != null) {
+                  console.log("[ExplorerClient] geocode success", {
+                    lat: data.lat,
+                    lon: data.lon,
+                  });
+                  params.set("lat", String(data.lat));
+                  params.set("lon", String(data.lon));
+                  if (data.boundingbox) {
+                    params.set("min_lat", String(data.boundingbox.south));
+                    params.set("max_lat", String(data.boundingbox.north));
+                    params.set("min_lon", String(data.boundingbox.west));
+                    params.set("max_lon", String(data.boundingbox.east));
+                  }
+                  break;
+                }
               }
+            } catch {
+              // Try next fallback
             }
-          } catch {
-            // Try next fallback
           }
         }
+        const newUrl = `/explorer${params.toString() ? `?${params.toString()}` : ""}`;
+        console.log("[ExplorerClient] router.push", newUrl);
+        router.push(newUrl);
+      } finally {
+        setIsFindingLocation(false);
+        console.log("[ExplorerClient] handleSearchSubmit done");
       }
-      router.push(
-        `/explorer${params.toString() ? `?${params.toString()}` : ""}`,
-      );
     },
     [router, searchParams],
   );
@@ -621,6 +780,8 @@ export default function ExplorerClient() {
           sensors={sensorsToShow}
           onBoundsChange={handleBoundsChange}
           fitToSensorsTrigger={fitToSensorsTrigger}
+          fitToLocation={fitToLocation}
+          fitToLocationZoom={12}
           focusSensorId={focusSensor?.id ?? null}
         />
       </div>
@@ -643,6 +804,9 @@ export default function ExplorerClient() {
           locationFetchUsedFallback={locationFetchUsedFallback}
           requestedDataTypes={selectedDataTypes}
           onSearchSubmit={handleSearchSubmit}
+          initialSearch={initialSearch}
+          hasLocationCoords={hasLocationCoords}
+          isFindingLocation={isFindingLocation}
         />
       </div>
     </div>

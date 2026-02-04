@@ -2,10 +2,25 @@
  * Geocoding API route using Nominatim (OpenStreetMap).
  * GET /api/geocode?q=Oakland
  * GET /api/geocode?q=San+Francisco&countrycodes=us  (bias to US)
- * Returns { lat, lon, display_name } or null.
+ * Returns { lat, lon, display_name, boundingbox? } or null.
+ * When q is "City, State", tries city-only first for a tighter boundary.
  */
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
+/** Max bbox area (km²) — reject larger (e.g. Bay Area ~18k km²), use radius instead. SF city ~121 km². */
+const MAX_BBOX_AREA_KM2 = 1500;
+
+function bboxAreaKm2(bbox: {
+  south: number;
+  north: number;
+  west: number;
+  east: number;
+}): number {
+  const latKm = 111;
+  const lonKm =
+    111 * Math.cos((bbox.south + bbox.north) * 0.5 * (Math.PI / 180));
+  return (bbox.north - bbox.south) * latKm * (bbox.east - bbox.west) * lonKm;
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -15,12 +30,16 @@ export async function GET(request: Request) {
   }
   const countrycodes = searchParams.get("countrycodes")?.trim() || "us";
 
-  async function fetchGeocode(countrycodesParam: string | null) {
+  /** Try city-only first when "City, State" or "City, Country" for tighter boundary */
+  const cityOnly = q.includes(",") ? q.split(",")[0]!.trim() : null;
+
+  async function fetchGeocode(query: string, countrycodesParam: string | null) {
     const url = new URL(NOMINATIM_BASE);
-    url.searchParams.set("q", q);
+    url.searchParams.set("q", query);
     url.searchParams.set("format", "json");
     url.searchParams.set("limit", "1");
-    if (countrycodesParam) url.searchParams.set("countrycodes", countrycodesParam);
+    if (countrycodesParam)
+      url.searchParams.set("countrycodes", countrycodesParam);
 
     const res = await fetch(url.toString(), {
       headers: {
@@ -33,14 +52,21 @@ export async function GET(request: Request) {
       lat: string;
       lon: string;
       display_name: string;
+      boundingbox?: [string, string, string, string]; // [south, north, west, east]
     }[];
     return data[0] ?? null;
   }
 
   try {
-    let first = await fetchGeocode(countrycodes);
+    let first: Awaited<ReturnType<typeof fetchGeocode>> = null;
+    if (cityOnly) {
+      first = await fetchGeocode(cityOnly, countrycodes);
+    }
+    if (!first) {
+      first = await fetchGeocode(q, countrycodes);
+    }
     if (!first && countrycodes) {
-      first = await fetchGeocode(null);
+      first = await fetchGeocode(q, null);
     }
     if (!first) {
       return Response.json(null);
@@ -53,11 +79,43 @@ export async function GET(request: Request) {
         { status: 502 },
       );
     }
-    return Response.json({
+    const result: {
+      lat: number;
+      lon: number;
+      display_name: string;
+      boundingbox?: {
+        south: number;
+        north: number;
+        west: number;
+        east: number;
+      };
+    } = {
       lat,
       lon,
       display_name: first.display_name ?? `${lat}, ${lon}`,
-    });
+    };
+    const bbox = first.boundingbox;
+    if (
+      Array.isArray(bbox) &&
+      bbox.length >= 4 &&
+      bbox.every((v) => typeof v === "string")
+    ) {
+      const [south, north, west, east] = bbox.map(parseFloat);
+      if (
+        !Number.isNaN(south) &&
+        !Number.isNaN(north) &&
+        !Number.isNaN(west) &&
+        !Number.isNaN(east) &&
+        south < north &&
+        west < east
+      ) {
+        const area = bboxAreaKm2({ south, north, west, east });
+        if (area <= MAX_BBOX_AREA_KM2) {
+          result.boundingbox = { south, north, west, east };
+        }
+      }
+    }
+    return Response.json(result);
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : "Geocoding failed" },

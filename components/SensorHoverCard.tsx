@@ -1,14 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getLatestReading,
   type LatestReadingResponse,
 } from "@/lib/sensors-api";
 import type { Sensor } from "@/lib/types";
 
-/** Format measurement key for display (e.g. pm2_5_ug_per_m3 → PM2.5) */
+/** Time period suffixes in measurement keys (e.g. pm2_5_ug_per_m3_10min) */
+const TIME_PERIOD_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /_10min|_10m|_10_min$/i, label: "10 min" },
+  { pattern: /_30min|_30m|_30_min$/i, label: "30 min" },
+  { pattern: /_1h|_1hour|_60min|_60m$/i, label: "1 hour" },
+  { pattern: /_6h|_6hour|_360min$/i, label: "6 hours" },
+  { pattern: /_24h|_24hour|_1d|_1440min$/i, label: "24 hours" },
+];
+
+function parseTimePeriod(key: string): {
+  baseKey: string;
+  periodLabel: string;
+} {
+  for (const { pattern, label } of TIME_PERIOD_PATTERNS) {
+    if (pattern.test(key)) {
+      const baseKey = key.replace(pattern, "");
+      return { baseKey, periodLabel: label };
+    }
+  }
+  return { baseKey: key, periodLabel: "Current" };
+}
+
+/** Format measurement key for display (e.g. pm2_5_ug_per_m3 → PM2.5). Strips time suffix for lookup. */
 function formatMeasurementKey(key: string): string {
+  const { baseKey } = parseTimePeriod(key);
   const known: Record<string, string> = {
     pm2_5_ug_per_m3: "PM2.5",
     pm10_ug_per_m3: "PM10",
@@ -22,7 +45,35 @@ function formatMeasurementKey(key: string): string {
     dissolved_oxygen_mg_per_l: "Dissolved O₂",
     turbidity_ntu: "Turbidity",
   };
-  return known[key] ?? key.replace(/_/g, " ");
+  return known[baseKey] ?? baseKey.replace(/_/g, " ");
+}
+
+/** Group measurements by time period when suffixes are present */
+function groupMeasurementsByPeriod(
+  measurements: Record<string, unknown>,
+): Map<string, { key: string; value: unknown }[]> {
+  const byPeriod = new Map<string, { key: string; value: unknown }[]>();
+  for (const [key, value] of Object.entries(measurements)) {
+    const { periodLabel } = parseTimePeriod(key);
+    const entry = { key, value };
+    const list = byPeriod.get(periodLabel) ?? [];
+    list.push(entry);
+    byPeriod.set(periodLabel, list);
+  }
+  return byPeriod;
+}
+
+/** Sort period labels: Current first, then 10 min, 30 min, 1 hour, 6 hours, 24 hours */
+function sortPeriodLabels(labels: string[]): string[] {
+  const orderMap: Record<string, number> = {
+    Current: 0,
+    "10 min": 1,
+    "30 min": 2,
+    "1 hour": 3,
+    "6 hours": 4,
+    "24 hours": 5,
+  };
+  return [...labels].sort((a, b) => (orderMap[a] ?? 99) - (orderMap[b] ?? 99));
 }
 
 /** Format measurement value for display */
@@ -115,6 +166,13 @@ export default function SensorHoverCard({
     measurements &&
     typeof measurements === "object" &&
     Object.keys(measurements).length > 0;
+  const measurementsByPeriod = useMemo(
+    () =>
+      hasMeasurements && measurements
+        ? groupMeasurementsByPeriod(measurements)
+        : null,
+    [measurements, hasMeasurements],
+  );
 
   const lastReadingDisplay = loadingReading ? (
     <span className="inline-flex items-center gap-1.5">
@@ -122,19 +180,19 @@ export default function SensorHoverCard({
         <>
           <span>{formatTimestamp(lastReadingTimestamp)}</span>
           <span
-            className="size-2 animate-pulse rounded-full bg-amber-500"
+            className="size-2 animate-pulse rounded-full bg-amber-400"
             aria-hidden
           />
         </>
       ) : (
-        <span className="inline-flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+        <span className="inline-flex items-center gap-1.5 text-white/60">
           <span className="size-2 animate-pulse rounded-full bg-current" />
           Loading…
         </span>
       )}
     </span>
   ) : notAvailable ? (
-    <span className="inline-flex rounded-full bg-zinc-200/80 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700/80 dark:text-zinc-400">
+    <span className="inline-flex rounded-md bg-white/15 px-2 py-0.5 text-xs font-medium text-white/70">
       Not available
     </span>
   ) : lastReadingTimestamp ? (
@@ -144,52 +202,90 @@ export default function SensorHoverCard({
   );
 
   return (
-    <div className="flex min-w-48 max-w-56 flex-col rounded-lg border border-zinc-200/80 bg-white/95 p-4 shadow-lg backdrop-blur-sm dark:border-zinc-700/60 dark:bg-zinc-900/95">
-      <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+    <div className="flex min-w-64 max-w-80 flex-col rounded-xl border border-white/10 bg-[#1a1a1a]/95 p-5 shadow-xl backdrop-blur-md">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-white/50">
         Sensor details
       </h3>
-      <div className="mt-3 grid flex-1 grid-cols-1 gap-3">
+      <div className="mt-4 grid flex-1 grid-cols-1 gap-4">
         <div>
-          <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
             Name
           </div>
-          <div className="mt-0.5 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          <div className="mt-1 truncate text-base font-semibold text-white/95">
             {sensor.name}
           </div>
         </div>
         <div>
-          <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
             Location
           </div>
-          <div className="mt-0.5 truncate text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+          <div className="mt-1 truncate text-sm font-medium text-emerald-400">
             {formatLocation(sensor)}
           </div>
         </div>
-        {hasMeasurements && (
-          <div>
-            <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-              Reading
-            </div>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {Object.entries(measurements).map(([key, value]) => (
-                <span
-                  key={key}
-                  className="inline-flex rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                >
-                  {formatMeasurementKey(key)}: {formatMeasurementValue(value)}
-                </span>
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
+            Reading
+          </div>
+          {loadingReading && shouldFetchReading ? (
+            <div className="mt-2 space-y-1.5">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="h-5 animate-pulse rounded bg-white/10"
+                  aria-hidden
+                />
               ))}
             </div>
-          </div>
-        )}
+          ) : hasMeasurements && measurementsByPeriod ? (
+            <div className="mt-2 space-y-3">
+              {sortPeriodLabels(Array.from(measurementsByPeriod.keys())).map(
+                (periodLabel) => {
+                  const entries = measurementsByPeriod.get(periodLabel) ?? [];
+                  return (
+                    <div
+                      key={periodLabel}
+                      className="overflow-hidden rounded-lg border border-white/10"
+                    >
+                      <div className="border-b border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/50">
+                        {periodLabel}
+                      </div>
+                      <table className="w-full text-left text-xs">
+                        <tbody>
+                          {entries.map(({ key, value }) => (
+                            <tr
+                              key={key}
+                              className="border-b border-white/5 last:border-b-0"
+                            >
+                              <td className="py-1.5 pl-3 pr-2 font-medium text-white/60">
+                                {formatMeasurementKey(key)}
+                              </td>
+                              <td className="py-1.5 pr-3 text-right font-semibold text-white/95">
+                                {formatMeasurementValue(value)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                },
+              )}
+            </div>
+          ) : notAvailable ? (
+            <div className="mt-2 text-xs text-white/50">Not available</div>
+          ) : (
+            <div className="mt-2 text-xs text-white/50">—</div>
+          )}
+        </div>
         {(sensor.provider_name ||
           sensor.feed_name ||
           sensor.connected_service) && (
           <div>
-            <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-white/40">
               Data source
             </div>
-            <div className="mt-0.5 truncate text-xs text-zinc-600 dark:text-zinc-300">
+            <div className="mt-1 truncate text-sm text-white/70">
               {[
                 sensor.provider_name,
                 sensor.feed_name,
@@ -201,11 +297,9 @@ export default function SensorHoverCard({
           </div>
         )}
       </div>
-      <div className="mt-3 flex items-center justify-between border-t border-zinc-200/60 pt-3 dark:border-zinc-700/50">
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          Last reading
-        </span>
-        <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+      <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-4">
+        <span className="text-xs text-white/50">Last reading</span>
+        <span className="text-xs font-semibold text-white/95">
           {lastReadingDisplay}
         </span>
       </div>

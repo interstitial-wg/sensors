@@ -7,13 +7,14 @@ const UMAMI_SCRIPT_URL =
   "https://cloud.umami.is/script.js";
 
 /**
- * Umami Analytics – loads only when NEXT_PUBLIC_UMAMI_WEBSITE_ID is set (e.g. in production).
- * Set the env var in your deployment to enable tracking.
+ * Umami Analytics – loads only when NEXT_PUBLIC_UMAMI_WEBSITE_ID is set and NODE_ENV is production.
+ * Disabled in development to avoid 404s from api-gateway.umami.dev.
  */
 export function UmamiAnalytics() {
   const websiteId = process.env.NEXT_PUBLIC_UMAMI_WEBSITE_ID;
+  const isProduction = process.env.NODE_ENV === "production";
 
-  if (!websiteId) {
+  if (!websiteId || !isProduction) {
     return null;
   }
 

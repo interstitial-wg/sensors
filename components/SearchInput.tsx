@@ -84,12 +84,12 @@ export default function SearchInput({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const initialQuery =
-    mode === "explorer" ? (searchParams.get("q")?.trim() ?? "") : "";
+  const qParam = searchParams.get("q") ?? "";
+  const typeParam = searchParams.get("type") ?? "";
+  const initialQuery = mode === "explorer" ? qParam.trim() : "";
   const initialTypes = useMemo(() => {
     if (mode !== "explorer") return new Set(DATA_TYPE_IDS);
-    const typeParam = searchParams.get("type")?.trim();
-    if (!typeParam) return new Set(DATA_TYPE_IDS);
+    if (!typeParam.trim()) return new Set(DATA_TYPE_IDS);
     return new Set(
       typeParam
         .split(",")
@@ -97,7 +97,7 @@ export default function SearchInput({
         .filter(Boolean)
         .filter((t) => DATA_TYPE_IDS.has(t)),
     );
-  }, [mode, searchParams]);
+  }, [mode, typeParam]);
 
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(initialTypes);
@@ -116,14 +116,13 @@ export default function SearchInput({
   useEffect(() => {
     if (mode === "explorer") {
       if (!justSubmittedRef.current) {
-        setQuery(searchParams.get("q")?.trim() ?? "");
+        setQuery(qParam.trim());
       } else {
         justSubmittedRef.current = false;
         setQuery("");
       }
-      const typeParam = searchParams.get("type")?.trim();
       setSelectedTypes(
-        !typeParam
+        !typeParam.trim()
           ? new Set(DATA_TYPE_IDS)
           : new Set(
               typeParam
@@ -134,7 +133,7 @@ export default function SearchInput({
             ),
       );
     }
-  }, [mode, searchParams]);
+  }, [mode, qParam, typeParam]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

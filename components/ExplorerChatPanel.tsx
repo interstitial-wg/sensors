@@ -7,6 +7,40 @@ import type { Sensor } from "@/lib/types";
 
 const STREAM_LINE_DELAY_MS = 180;
 
+const COMPUTING_PLACEHOLDER = "__COMPUTING__";
+
+const PHASE_LABELS: Record<string, string> = {
+  finding_location: "Finding location…",
+  looking_for_sensors: "Looking up sensors…",
+  gathering_data: "Gathering data…",
+  computing: "Calculating…",
+};
+
+/** Parse **bold** markers and render as spans */
+function renderWithBold(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={i} className="font-semibold">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return part;
+  });
+}
+
+/** Bubble shown while search is in progress - shows phase-specific message */
+function ComputingBubble({ phase }: { phase: string }) {
+  const label = PHASE_LABELS[phase] ?? "Working…";
+  return (
+    <div className="max-w-[90%] rounded-2xl border border-white/10 px-4 py-2.5 text-sm text-white/95 animate-computing-pulse">
+      <p>{label}</p>
+    </div>
+  );
+}
+
 /** Assistant bubble that streams its content line-by-line with gradient fade when it's the latest */
 function AssistantBubble({
   content,
@@ -63,7 +97,7 @@ function AssistantBubble({
                 : "block"
             }
           >
-            {line}
+            {renderWithBold(line)}
             {i < displayedLines.length - 1 ? "\n" : ""}
           </span>
         ))}
@@ -94,6 +128,9 @@ export interface ExplorerChatPanelProps {
     query: string,
     selectedTypes: Set<string>,
   ) => void | Promise<void>;
+  initialSearch?: string;
+  hasLocationCoords?: boolean;
+  isFindingLocation?: boolean;
 }
 
 export default function ExplorerChatPanel({
@@ -105,16 +142,34 @@ export default function ExplorerChatPanel({
   locationFetchUsedFallback = false,
   requestedDataTypes,
   onSearchSubmit,
+  initialSearch = "",
+  hasLocationCoords = false,
+  isFindingLocation = false,
 }: ExplorerChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<
     { role: "user" | "assistant"; content: string }[]
   >([]);
+  const [computingPhase, setComputingPhase] = useState("looking_for_sensors");
   const prevLoadingRef = useRef(loadingSensors);
   const pendingSearchRef = useRef(false);
+  const sensorsRef = useRef(sensors);
+  sensorsRef.current = sensors;
+
+  // When landing from home page with search params, add user message so assistant flow runs
+  useEffect(() => {
+    if (messages.length === 0 && initialSearch && hasLocationCoords) {
+      setMessages([{ role: "user", content: initialSearch }]);
+      pendingSearchRef.current = true;
+    }
+  }, [initialSearch, hasLocationCoords, messages.length]);
 
   const handleSearchSubmit = useCallback(
     (query: string, selectedTypes: Set<string>) => {
+      console.log("[ExplorerChatPanel] handleSearchSubmit", {
+        query: query.trim() || "Show sensors",
+        selectedTypes: [...selectedTypes],
+      });
       setMessages((prev) => [
         ...prev,
         { role: "user", content: query.trim() || "Show sensors" },
@@ -125,45 +180,134 @@ export default function ExplorerChatPanel({
     [onSearchSubmit],
   );
 
-  // When loading completes and we have a user message at the end, fetch readings and add assistant reply with average
+  const isBuildingReplyRef = useRef(false);
+  const cancelBuildRef = useRef<(() => void) | null>(null);
+
+  // Cancel in-flight build on unmount
+  useEffect(() => {
+    return () => cancelBuildRef.current?.();
+  }, []);
+
+  // Sync computing phase with actual operations (don't overwrite when buildAssistantReply is running)
+  useEffect(() => {
+    if (isBuildingReplyRef.current) return;
+    if (isFindingLocation) setComputingPhase("finding_location");
+    else if (loadingSensors) setComputingPhase("looking_for_sensors");
+  }, [isFindingLocation, loadingSensors]);
+
+  // When loading completes and we have a user message at the end, build assistant reply
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = loadingSensors;
 
+    console.log("[ExplorerChatPanel] build-reply effect", {
+      messagesLength: messages.length,
+      lastRole: messages[messages.length - 1]?.role,
+      loadingSensors,
+      wasLoading,
+      pendingSearch: pendingSearchRef.current,
+      sensorCount: sensorsRef.current.length,
+    });
+
     if (messages.length === 0) return;
     const last = messages[messages.length - 1];
-    if (last.role !== "user") return;
-    if (loadingSensors) return;
-    if (!wasLoading && !pendingSearchRef.current) return;
+    if (last.role !== "user") {
+      console.log("[ExplorerChatPanel] skipping: last message is not user");
+      return;
+    }
+    if (loadingSensors) {
+      console.log("[ExplorerChatPanel] skipping: still loading sensors");
+      return;
+    }
+    if (!wasLoading && !pendingSearchRef.current) {
+      console.log(
+        "[ExplorerChatPanel] skipping: no loading transition, no pending search",
+      );
+      return;
+    }
     pendingSearchRef.current = false;
 
+    // Cancel any in-flight build before starting a new one (don't cancel when effect re-runs due to adding placeholder)
+    cancelBuildRef.current?.();
+    cancelBuildRef.current = null;
+
     const userQuery = last.content;
+    const sensorsToUse = sensorsRef.current;
     let cancelled = false;
+    cancelBuildRef.current = () => {
+      cancelled = true;
+    };
+
+    console.log("[ExplorerChatPanel] starting buildAssistantReply", {
+      userQuery,
+      sensorCount: sensorsToUse.length,
+    });
+
+    const runReply = () => {
+      if (cancelled) return;
+      setComputingPhase("gathering_data");
+      isBuildingReplyRef.current = true;
+      buildAssistantReply(sensorsToUse, userQuery, sensorsError, {
+        requestedTypeNotAvailable: locationFetchUsedFallback,
+        requestedDataTypes,
+        onPhase: (p) => !cancelled && setComputingPhase(p),
+      })
+        .then((reply) => {
+          console.log("[ExplorerChatPanel] buildAssistantReply resolved", {
+            cancelled,
+            replyLength: reply?.length,
+            replyPreview: reply?.slice(0, 80),
+          });
+          isBuildingReplyRef.current = false;
+          if (!cancelled) {
+            setMessages((prev) => {
+              const next = [...prev];
+              if (next[next.length - 1]?.content === COMPUTING_PLACEHOLDER) {
+                next[next.length - 1] = { role: "assistant", content: reply };
+              }
+              return next;
+            });
+          } else {
+            console.log(
+              "[ExplorerChatPanel] reply discarded: effect was cancelled",
+            );
+          }
+        })
+        .catch((err) => {
+          console.log("[ExplorerChatPanel] buildAssistantReply rejected", {
+            cancelled,
+            err: err instanceof Error ? err.message : String(err),
+          });
+          isBuildingReplyRef.current = false;
+          if (!cancelled) {
+            const msg =
+              err instanceof Error ? err.message : "Failed to load readings";
+            setMessages((prev) => {
+              const next = [...prev];
+              if (next[next.length - 1]?.content === COMPUTING_PLACEHOLDER) {
+                next[next.length - 1] = {
+                  role: "assistant",
+                  content: `Sorry, something went wrong: ${msg}`,
+                };
+              }
+              return next;
+            });
+          }
+        });
+    };
+
     setMessages((prev) => [
       ...prev,
-      { role: "assistant", content: "Computing…" },
+      { role: "assistant", content: COMPUTING_PLACEHOLDER },
     ]);
-    buildAssistantReply(sensors, userQuery, sensorsError, {
-      requestedTypeNotAvailable: locationFetchUsedFallback,
-      requestedDataTypes,
-    }).then((reply) => {
-      if (!cancelled) {
-        setMessages((prev) => {
-          const next = [...prev];
-          if (next[next.length - 1]?.content === "Computing…") {
-            next[next.length - 1] = { role: "assistant", content: reply };
-          }
-          return next;
-        });
-      }
-    });
+    runReply();
     return () => {
-      cancelled = true;
+      // Don't cancel here - effect re-runs when we add COMPUTING_PLACEHOLDER, which would wrongly discard the reply.
+      // We only cancel when starting a new build (above) or on unmount (separate effect).
     };
   }, [
     loadingSensors,
     messages,
-    sensors,
     sensorsError,
     locationFetchUsedFallback,
     requestedDataTypes,
@@ -257,6 +401,8 @@ export default function ExplorerChatPanel({
                   <div className="max-w-[90%] rounded-2xl bg-white/20 px-4 py-2.5 text-sm text-white">
                     <p className="whitespace-pre-wrap">{m.content}</p>
                   </div>
+                ) : m.content === COMPUTING_PLACEHOLDER ? (
+                  <ComputingBubble phase={computingPhase} />
                 ) : (
                   <AssistantBubble
                     content={m.content}
