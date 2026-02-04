@@ -264,7 +264,6 @@ export default function ExplorerClient() {
         lat?: number;
         lon?: number;
         radius_km?: number;
-        sensor_type?: string | null;
       }): Promise<Sensor[]> {
         const acc: Sensor[] = [];
         const seen = new Set<string>();
