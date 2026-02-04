@@ -234,6 +234,19 @@ export default function ExplorerChatPanel({
     else if (loadingSensors) setComputingPhase("looking_for_sensors");
   }, [isFindingLocation, loadingSensors]);
 
+  // When we have a user message and we're waiting (finding location or loading sensors), show ComputingBubble
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== "user") return;
+    if (!isFindingLocation && !loadingSensors) return;
+    if (messages.some((m) => m.content === COMPUTING_PLACEHOLDER)) return;
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: COMPUTING_PLACEHOLDER },
+    ]);
+  }, [messages, isFindingLocation, loadingSensors]);
+
   // When loading completes and we have a user message at the end, build assistant reply
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;
@@ -246,12 +259,22 @@ export default function ExplorerChatPanel({
       wasLoading,
       pendingSearch: pendingSearchRef.current,
       sensorCount: sensorsRef.current.length,
+      isFindingLocation,
     });
 
     if (messages.length === 0) return;
     const last = messages[messages.length - 1];
-    if (last.role !== "user") {
-      console.log("[ExplorerChatPanel] skipping: last message is not user");
+    const lastIsUser = last.role === "user";
+    const lastIsComputing =
+      last.role === "assistant" && last.content === COMPUTING_PLACEHOLDER;
+    if (!lastIsUser && !lastIsComputing) {
+      console.log(
+        "[ExplorerChatPanel] skipping: last message is not user or computing",
+      );
+      return;
+    }
+    if (isFindingLocation) {
+      console.log("[ExplorerChatPanel] skipping: finding location");
       return;
     }
     if (loadingSensors) {
@@ -270,7 +293,11 @@ export default function ExplorerChatPanel({
     cancelBuildRef.current?.();
     cancelBuildRef.current = null;
 
-    const userQuery = last.content;
+    const userQuery = lastIsUser
+      ? last.content
+      : messages[messages.length - 2]?.role === "user"
+        ? messages[messages.length - 2].content
+        : last.content;
     const sensorsToUse = sensorsRef.current;
     let cancelled = false;
     cancelBuildRef.current = () => {
@@ -349,10 +376,12 @@ export default function ExplorerChatPanel({
         });
     };
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", content: COMPUTING_PLACEHOLDER },
-    ]);
+    if (lastIsUser) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: COMPUTING_PLACEHOLDER },
+      ]);
+    }
     runReply();
     return () => {
       // Don't cancel here - effect re-runs when we add COMPUTING_PLACEHOLDER, which would wrongly discard the reply.
@@ -365,6 +394,7 @@ export default function ExplorerChatPanel({
     locationFetchUsedFallback,
     requestedDataTypes,
     hasLocationCoords,
+    isFindingLocation,
   ]);
 
   useEffect(() => {
