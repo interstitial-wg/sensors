@@ -78,7 +78,12 @@ export async function buildAssistantReply(
   if (error) {
     return `Sorry, something went wrong: ${error}`;
   }
-  const count = sensors.length;
+  // Use only sensors with coordinates - matches what the map displays (dots)
+  const sensorsWithCoords = sensors.filter(
+    (s): s is Sensor & { latitude: number; longitude: number } =>
+      s.latitude != null && s.longitude != null,
+  );
+  const count = sensorsWithCoords.length;
   if (count === 0) {
     console.log("[buildAssistantReply] early return: no sensors");
     return `No sensors found${userQuery ? ` for "${userQuery}"` : ""}. Try a different location or filter.`;
@@ -104,7 +109,7 @@ export async function buildAssistantReply(
         return f ?? id;
       })
       .join(", ");
-    const sensorTypes = new Set(sensors.map((s) => s.sensor_type));
+    const sensorTypes = new Set(sensorsWithCoords.map((s) => s.sensor_type));
     const available: string[] = [];
     for (const st of sensorTypes) {
       const types = SENSOR_TYPE_TO_DATA_TYPES[st];
@@ -122,7 +127,7 @@ export async function buildAssistantReply(
       `No ${requestedLabels} sensors in this area.`,
       `Nearby sensors (${count} found) measure: ${availableStr}.`,
       "",
-      ...sensors
+      ...sensorsWithCoords
         .slice(0, 5)
         .map((s) => `• ${s.name} — ${s.sensor_type.replace(/_/g, " ")}`),
     ];
@@ -134,7 +139,7 @@ export async function buildAssistantReply(
   const requestedFromQuery = new Set(parsed.dataTypeIds);
   let dataTypeIds = parsed.dataTypeIds;
   if (dataTypeIds.size === 0) {
-    const sensorTypes = new Set(sensors.map((s) => s.sensor_type));
+    const sensorTypes = new Set(sensorsWithCoords.map((s) => s.sensor_type));
     const inferred = new Set<string>();
     if (sensorTypes.has("weather_station"))
       ["temperature", "humidity", "wind"].forEach((id) => inferred.add(id));
@@ -156,7 +161,7 @@ export async function buildAssistantReply(
   const uniqueKeys = [...new Set(measurementKeys)];
 
   options?.onPhase?.("gathering_data");
-  const sensorsToQuery = sensors;
+  const sensorsToQuery = sensorsWithCoords;
   console.log(
     "[buildAssistantReply] phase: gathering_data, fetching readings for",
     sensorsToQuery.length,
@@ -227,6 +232,28 @@ export async function buildAssistantReply(
       }
     }
   }
+  // #region agent log
+  fetch("http://127.0.0.1:7246/ingest/78cffbd9-4138-432a-a52d-d31e500958fc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      location: "assistant-reply.ts:valuesByKey",
+      message: "Temperature extraction debug",
+      data: {
+        hypothesisId: "A",
+        uniqueKeys,
+        air_temperature_c_count: valuesByKey.air_temperature_c?.count ?? 0,
+        water_temperature_c_count: valuesByKey.water_temperature_c?.count ?? 0,
+        sensorsWithAnyTempKey,
+        tempLikeKeysFromApi: tempLikeKeys,
+        allMeasurementKeysChecked: allMeasurementKeys,
+        sampleRawKeys,
+      },
+      timestamp: Date.now(),
+      sessionId: "debug-session",
+    }),
+  }).catch(() => {});
+  // #endregion
 
   const averages: {
     label: string;
@@ -286,33 +313,44 @@ export async function buildAssistantReply(
 
   const lines: string[] = [];
 
+  const totalSensorsLine = `We found **${count}** sensors in the area.`;
+  const respondedLine = `**${respondedCount}** returned readings we could use.`;
+
   if (requestedButNotAvailable) {
     lines.push(
       `No ${requestedLabels.join(" or ")} sensors${locationPhrase}. The sensors here measure ${availableAverages.map((a) => a.label).join(", ")}.`,
     );
+    lines.push("");
+    lines.push(totalSensorsLine);
+    lines.push(respondedLine);
     for (const { label, value, unit, sensorCount } of availableAverages) {
       const formatted = Number.isInteger(value)
         ? String(value)
         : value.toFixed(1);
       lines.push(
-        `We found that among ${sensorCount} sensors, the average **${label}** is **${formatted}${unit}**.`,
+        `**${sensorCount}** had **${label}** data — average: **${formatted}${unit}**`,
       );
     }
   } else if (averages.length > 0) {
+    lines.push(totalSensorsLine);
+    lines.push(respondedLine);
     for (const { label, value, unit, sensorCount } of averages) {
       const formatted = Number.isInteger(value)
         ? String(value)
         : value.toFixed(1);
       lines.push(
-        `We found that among ${sensorCount} sensors, the average **${label}** is **${formatted}${unit}**.`,
+        `**${sensorCount}** had **${label}** data — average: **${formatted}${unit}**`,
       );
     }
   } else if (respondedCount === 0) {
+    lines.push(totalSensorsLine);
     lines.push(
-      "No readings available. The sensors API may not expose /readings/latest for these sensors.",
+      "None returned usable readings. The sensors API may not expose /readings/latest for these sensors.",
     );
   } else {
-    lines.push("No readings available for the requested measurements.");
+    lines.push(totalSensorsLine);
+    lines.push(respondedLine);
+    lines.push("None had data for the requested measurements.");
   }
 
   const result = lines.join("\n");

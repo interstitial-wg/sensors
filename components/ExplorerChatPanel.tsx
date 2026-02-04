@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import SearchInput from "@/components/SearchInput";
 import { buildAssistantReply } from "@/lib/assistant-reply";
 import type { Sensor } from "@/lib/types";
@@ -41,13 +42,48 @@ function ComputingBubble({ phase }: { phase: string }) {
   );
 }
 
+/** Collapsible "Thinking steps" section - expandable to see what ran */
+function ThinkingSteps({ steps }: { steps: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (steps.length === 0) return null;
+  const labels = steps.map((s) => PHASE_LABELS[s] ?? s);
+  return (
+    <div className="mt-3 border-t border-white/10 pt-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="flex w-full items-center gap-1.5 text-xs text-white/50 hover:text-white/70 transition"
+      >
+        {expanded ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+        )}
+        <span>Thinking steps</span>
+      </button>
+      {expanded && (
+        <ul className="mt-1.5 space-y-1 pl-5 text-xs text-white/50">
+          {labels.map((label, i) => (
+            <li key={i} className="flex items-center gap-2">
+              <span className="h-1 w-1 shrink-0 rounded-full bg-white/40" />
+              {label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** Assistant bubble that streams its content line-by-line with gradient fade when it's the latest */
 function AssistantBubble({
   content,
   isStreaming,
+  steps,
 }: {
   content: string;
   isStreaming: boolean;
+  steps?: string[];
 }) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const lines = content.split("\n");
@@ -102,6 +138,7 @@ function AssistantBubble({
           </span>
         ))}
       </p>
+      {steps && steps.length > 0 && <ThinkingSteps steps={steps} />}
     </div>
   );
 }
@@ -118,6 +155,7 @@ function toDMS(decimal: number, isLat: boolean): string {
 
 export interface ExplorerChatPanelProps {
   focusSensor: Sensor | null;
+  onCloseFocus?: () => void;
   sensorCount: number;
   loadingSensors: boolean;
   sensorsError: string | null;
@@ -135,6 +173,7 @@ export interface ExplorerChatPanelProps {
 
 export default function ExplorerChatPanel({
   focusSensor,
+  onCloseFocus,
   sensorCount,
   loadingSensors,
   sensorsError,
@@ -148,7 +187,7 @@ export default function ExplorerChatPanel({
 }: ExplorerChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<
-    { role: "user" | "assistant"; content: string }[]
+    { role: "user" | "assistant"; content: string; steps?: string[] }[]
   >([]);
   const [computingPhase, setComputingPhase] = useState("looking_for_sensors");
   const prevLoadingRef = useRef(loadingSensors);
@@ -227,7 +266,7 @@ export default function ExplorerChatPanel({
     }
     pendingSearchRef.current = false;
 
-    // Cancel any in-flight build before starting a new one (don't cancel when effect re-runs due to adding placeholder)
+    // Cancel any in-flight build before starting a new one
     cancelBuildRef.current?.();
     cancelBuildRef.current = null;
 
@@ -245,12 +284,21 @@ export default function ExplorerChatPanel({
 
     const runReply = () => {
       if (cancelled) return;
+      const steps: string[] = [];
+      if (hasLocationCoords) {
+        steps.push("finding_location", "looking_for_sensors");
+      }
       setComputingPhase("gathering_data");
       isBuildingReplyRef.current = true;
       buildAssistantReply(sensorsToUse, userQuery, sensorsError, {
         requestedTypeNotAvailable: locationFetchUsedFallback,
         requestedDataTypes,
-        onPhase: (p) => !cancelled && setComputingPhase(p),
+        onPhase: (p) => {
+          if (!cancelled) {
+            steps.push(p);
+            setComputingPhase(p);
+          }
+        },
       })
         .then((reply) => {
           console.log("[ExplorerChatPanel] buildAssistantReply resolved", {
@@ -263,7 +311,11 @@ export default function ExplorerChatPanel({
             setMessages((prev) => {
               const next = [...prev];
               if (next[next.length - 1]?.content === COMPUTING_PLACEHOLDER) {
-                next[next.length - 1] = { role: "assistant", content: reply };
+                next[next.length - 1] = {
+                  role: "assistant",
+                  content: reply,
+                  steps: steps.length > 0 ? steps : undefined,
+                };
               }
               return next;
             });
@@ -288,6 +340,7 @@ export default function ExplorerChatPanel({
                 next[next.length - 1] = {
                   role: "assistant",
                   content: `Sorry, something went wrong: ${msg}`,
+                  steps: steps.length > 0 ? steps : undefined,
                 };
               }
               return next;
@@ -311,6 +364,7 @@ export default function ExplorerChatPanel({
     sensorsError,
     locationFetchUsedFallback,
     requestedDataTypes,
+    hasLocationCoords,
   ]);
 
   useEffect(() => {
@@ -329,10 +383,35 @@ export default function ExplorerChatPanel({
       <div className="scrollbar-hide flex min-h-0 flex-1 flex-col justify-end overflow-y-auto p-4">
         {focusSensor ? (
           <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white/95">
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="text-sm font-semibold text-white/95 shrink min-w-0">
                 {focusSensor.name}
               </h3>
+              {onCloseFocus && (
+                <button
+                  type="button"
+                  onClick={onCloseFocus}
+                  className="shrink-0 rounded-full p-1 text-white/60 hover:bg-white/10 hover:text-white transition"
+                  aria-label="Close sensor detail"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <div>
               <p className="mt-0.5 text-xs text-white/60">{sourceName}</p>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
@@ -409,6 +488,7 @@ export default function ExplorerChatPanel({
                     isStreaming={
                       i === messages.length - 1 && m.role === "assistant"
                     }
+                    steps={"steps" in m ? m.steps : undefined}
                   />
                 )}
               </div>

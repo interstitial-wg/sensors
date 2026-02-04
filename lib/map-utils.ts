@@ -165,6 +165,23 @@ export function centerFromBounds(bounds: Bounds): { lat: number; lon: number } {
   };
 }
 
+/** Bounds that encompass all sensors with coordinates. Returns null if none have coords. */
+export function sensorsToBounds(sensors: Sensor[]): Bounds | null {
+  const withCoords = sensors.filter(
+    (s): s is Sensor & { latitude: number; longitude: number } =>
+      s.latitude != null && s.longitude != null,
+  );
+  if (withCoords.length === 0) return null;
+  const lngs = withCoords.map((s) => s.longitude);
+  const lats = withCoords.map((s) => s.latitude);
+  return {
+    west: Math.min(...lngs),
+    south: Math.min(...lats),
+    east: Math.max(...lngs),
+    north: Math.max(...lats),
+  };
+}
+
 /** Sort sensors by distance from center (nearest first). Only sensors with coords are ordered; others go to the end. */
 export function sortSensorsByCenter(
   sensors: Sensor[],

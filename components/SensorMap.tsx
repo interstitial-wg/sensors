@@ -72,6 +72,8 @@ export interface SensorMapProps {
   fitToSensorsTrigger?: number;
   /** When set (e.g. from location search), fit map to this area instead of all sensors. Prevents zoom-out. */
   fitToLocation?: Bounds | null;
+  /** When set (sensors loaded from location search), fit to show all sensors. Takes precedence over fitToLocation. */
+  fitToSensorsBounds?: Bounds | null;
   /** When set with fitToLocation, use this zoom level. Default 11 (city scale). */
   fitToLocationZoom?: number;
   /** When set, fit map to this sensor and show its popup. Sensor must be in sensors array. */
@@ -83,6 +85,7 @@ export default function SensorMap({
   onBoundsChange,
   fitToSensorsTrigger = 0,
   fitToLocation = null,
+  fitToSensorsBounds = null,
   fitToLocationZoom = 11,
   focusSensorId = null,
 }: SensorMapProps) {
@@ -186,17 +189,28 @@ export default function SensorMap({
     [sensorsById],
   );
 
-  // Fit map when parent triggers. Prefer location (city/bbox) over sensors.
+  // Fit map when parent triggers. Prefer sensor bounds (show all) over location when sensors are loaded.
   const lastFittedTriggerRef = useRef(0);
   useEffect(() => {
     if (fitToSensorsTrigger <= 0) return;
     const map = mapRef.current?.getMap();
     if (!map || typeof map.fitBounds !== "function") return;
 
+    if (lastFittedTriggerRef.current === fitToSensorsTrigger) return;
+    lastFittedTriggerRef.current = fitToSensorsTrigger;
+
+    if (fitToSensorsBounds) {
+      map.fitBounds(
+        [
+          [fitToSensorsBounds.west, fitToSensorsBounds.south],
+          [fitToSensorsBounds.east, fitToSensorsBounds.north],
+        ],
+        { padding: 48, maxZoom: 14, duration: 250 },
+      );
+      return;
+    }
+
     if (fitToLocation) {
-      // Only fit once per trigger - don't re-run when sensors load progressively
-      if (lastFittedTriggerRef.current === fitToSensorsTrigger) return;
-      lastFittedTriggerRef.current = fitToSensorsTrigger;
       map.fitBounds(
         [
           [fitToLocation.west, fitToLocation.south],
@@ -221,7 +235,13 @@ export default function SensorMap({
       ],
       { padding: 48, maxZoom: 12, duration: 250 },
     );
-  }, [fitToSensorsTrigger, withCoords, fitToLocation, fitToLocationZoom]);
+  }, [
+    fitToSensorsTrigger,
+    withCoords,
+    fitToLocation,
+    fitToSensorsBounds,
+    fitToLocationZoom,
+  ]);
 
   // Fit map to and select a specific sensor (e.g. from ?sensor=id in URL)
   useEffect(() => {

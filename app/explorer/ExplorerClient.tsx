@@ -17,6 +17,7 @@ import {
   centerFromBounds,
   expandBounds,
   normalizeBounds,
+  sensorsToBounds,
   sortSensorsByCenter,
 } from "@/lib/map-utils";
 import type { Sensor } from "@/lib/types";
@@ -663,17 +664,29 @@ export default function ExplorerClient() {
     locationMaxLonParam,
   ]);
 
-  // Move map to location immediately when we have coords (don't wait for sensors)
+  // Fit map to location when we navigate, then to all sensors when they load (so user sees all dots)
+  const fitToSensorsBounds = useMemo(
+    () => (sensorsToShow.length > 0 ? sensorsToBounds(sensorsToShow) : null),
+    [sensorsToShow],
+  );
   const locationFitKey = hasLocationCoords
     ? `${locationLat}_${locationLon}_${locationBboxKey}`
     : null;
   const lastFittedLocationRef = useRef<string | null>(null);
+  const lastFittedSensorsCountRef = useRef(0);
   useEffect(() => {
     if (!locationFitKey) return;
     if (lastFittedLocationRef.current === locationFitKey) return;
     lastFittedLocationRef.current = locationFitKey;
+    lastFittedSensorsCountRef.current = 0;
     setFitToSensorsTrigger((t) => t + 1);
   }, [locationFitKey]);
+  useEffect(() => {
+    if (!hasLocationCoords || sensorsToShow.length === 0) return;
+    if (sensorsToShow.length === lastFittedSensorsCountRef.current) return;
+    lastFittedSensorsCountRef.current = sensorsToShow.length;
+    setFitToSensorsTrigger((t) => t + 1);
+  }, [hasLocationCoords, sensorsToShow.length]);
 
   const handleSearchSubmit = useCallback(
     async (query: string, selectedTypes: Set<string>) => {
@@ -705,6 +718,7 @@ export default function ExplorerClient() {
         const params = new URLSearchParams(searchParams.toString());
         params.delete("q");
         params.delete("type");
+        params.delete("sensor");
         params.delete("lat");
         params.delete("lon");
         params.delete("min_lat");
@@ -781,6 +795,7 @@ export default function ExplorerClient() {
           onBoundsChange={handleBoundsChange}
           fitToSensorsTrigger={fitToSensorsTrigger}
           fitToLocation={fitToLocation}
+          fitToSensorsBounds={fitToSensorsBounds}
           fitToLocationZoom={12}
           focusSensorId={focusSensor?.id ?? null}
         />
@@ -797,6 +812,17 @@ export default function ExplorerClient() {
       <div className="absolute left-0 top-0 bottom-0 z-10 flex w-96 max-w-[85vw] shrink-0 flex-col p-4 pt-20">
         <ExplorerChatPanel
           focusSensor={focusSensor}
+          onCloseFocus={
+            focusSensor
+              ? () => {
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.delete("sensor");
+                  router.push(
+                    `/explorer${params.toString() ? `?${params.toString()}` : ""}`,
+                  );
+                }
+              : undefined
+          }
           sensorCount={sensorsToShow.length}
           loadingSensors={loadingSensors}
           sensorsError={sensorsError}
