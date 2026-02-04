@@ -179,15 +179,30 @@ export default function SensorMap({
       features?: { properties?: { id?: string } }[];
     }) => {
       const features = evt.features;
-      if (!features?.length) return;
+      if (!features?.length) {
+        setHoveredSensor(null);
+        return;
+      }
       const feature = features[0];
       const id = feature?.properties?.id as string | undefined;
-      if (!id) return;
+      if (!id) {
+        setHoveredSensor(null);
+        return;
+      }
       const sensor = sensorsById[id] ?? null;
       setHoveredSensor(sensor);
     },
     [sensorsById],
   );
+
+  // Show pointer cursor when hovering over a sensor, grab otherwise
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const canvas = map.getCanvas();
+    if (!canvas) return;
+    canvas.style.cursor = hoveredSensor ? "pointer" : "grab";
+  }, [hoveredSensor]);
 
   // Fit map when parent triggers. Prefer sensor bounds (show all) over location when sensors are loaded.
   const lastFittedTriggerRef = useRef(0);
@@ -281,6 +296,7 @@ export default function SensorMap({
         onMoveEnd={handleMoveEnd}
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoveredSensor(null)}
         interactiveLayerIds={[SENSORS_LAYER_ID]}
       >
         <NavigationControl
