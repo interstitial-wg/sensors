@@ -66,28 +66,6 @@ const MAP_STYLE_LIGHT = {
   ],
 };
 
-const SENSOR_TYPE_COLORS: Record<string, string> = {
-  buoy: "#0ea5e9",
-  river_sensor: "#22c55e",
-  weather_station: "#eab308",
-  air_quality_monitor: "#a855f7",
-};
-
-/** MapLibre expression: color by sensor_type property, fallback #64748b */
-const CIRCLE_COLOR_EXPR: unknown = [
-  "match",
-  ["get", "sensor_type"],
-  "buoy",
-  SENSOR_TYPE_COLORS.buoy,
-  "river_sensor",
-  SENSOR_TYPE_COLORS.river_sensor,
-  "weather_station",
-  SENSOR_TYPE_COLORS.weather_station,
-  "air_quality_monitor",
-  SENSOR_TYPE_COLORS.air_quality_monitor,
-  "#64748b",
-];
-
 const SENSORS_SOURCE_ID = "sensors";
 const SENSORS_LAYER_ID = "sensors-circles";
 
@@ -147,11 +125,48 @@ export default function SensorMap({
     return { type: "FeatureCollection" as const, features };
   }, [withCoords]);
 
+  // Explicitly set source data when geojson changes — ensures MapLibre receives update after location search
+  useEffect(() => {
+    if (geojson.features.length === 0) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const source = map.getSource(SENSORS_SOURCE_ID) as
+      | { setData: (d: FeatureCollection) => void }
+      | undefined;
+    if (source?.setData) {
+      source.setData(geojson);
+      map.once("idle", () => {
+        if (typeof map.triggerRepaint === "function") map.triggerRepaint();
+        map.resize();
+      });
+    }
+  }, [geojson]);
+
   const sensorsById = useMemo(() => {
     const byId: Record<string, Sensor> = {};
     sensors.forEach((s) => (byId[s.id] = s));
     return byId;
   }, [sensors]);
+
+  // Force map repaint when sensors load — fixes dots not appearing until console/layout triggers reflow
+  useEffect(() => {
+    if (withCoords.length === 0) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    let raf2Id: number | null = null;
+    const raf1Id = requestAnimationFrame(() => {
+      raf2Id = requestAnimationFrame(() => {
+        if (typeof map.triggerRepaint === "function") {
+          map.triggerRepaint();
+        }
+        map.resize();
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1Id);
+      if (raf2Id != null) cancelAnimationFrame(raf2Id);
+    };
+  }, [withCoords.length]);
 
   const handleLoad = useCallback(() => {
     // Use ref for reliability; evt.target may differ across react-map-gl versions
@@ -242,6 +257,13 @@ export default function SensorMap({
     if (lastFittedTriggerRef.current === fitToSensorsTrigger) return;
     lastFittedTriggerRef.current = fitToSensorsTrigger;
 
+    const scheduleRepaintAfterFit = () => {
+      map.once("idle", () => {
+        if (typeof map.triggerRepaint === "function") map.triggerRepaint();
+        map.resize();
+      });
+    };
+
     if (fitToSensorsBounds) {
       map.fitBounds(
         [
@@ -250,6 +272,7 @@ export default function SensorMap({
         ],
         { padding: 48, maxZoom: 14, duration: 250 },
       );
+      scheduleRepaintAfterFit();
       return;
     }
 
@@ -261,6 +284,7 @@ export default function SensorMap({
         ],
         { padding: 48, maxZoom: fitToLocationZoom, duration: 250 },
       );
+      scheduleRepaintAfterFit();
       return;
     }
 
@@ -278,6 +302,7 @@ export default function SensorMap({
       ],
       { padding: 48, maxZoom: 12, duration: 250 },
     );
+    scheduleRepaintAfterFit();
   }, [
     fitToSensorsTrigger,
     withCoords,
@@ -332,15 +357,33 @@ export default function SensorMap({
           showCompass={true}
           showZoom={true}
         />
-        <Source id={SENSORS_SOURCE_ID} type="geojson" data={geojson}>
+        <Source
+          id={SENSORS_SOURCE_ID}
+          type="geojson"
+          data={geojson}
+          promoteId="id"
+        >
           <Layer
             id={SENSORS_LAYER_ID}
             type="circle"
+            minzoom={0}
             paint={{
-              "circle-radius": 5,
-              "circle-color": CIRCLE_COLOR_EXPR as string,
-              "circle-stroke-width": 1,
-              "circle-stroke-color": "rgba(255,255,255,0.9)",
+              "circle-radius": 8,
+              "circle-color": [
+                "match",
+                ["get", "sensor_type"],
+                "buoy",
+                "#0ea5e9",
+                "river_sensor",
+                "#22c55e",
+                "weather_station",
+                "#eab308",
+                "air_quality_monitor",
+                "#a855f7",
+                "#64748b",
+              ],
+              "circle-stroke-width": 2,
+              "circle-stroke-color": "rgba(255,255,255,0.95)",
             }}
           />
           {/* Highlighted dot for selected/focused sensor - uses site green (#9ab07f) */}

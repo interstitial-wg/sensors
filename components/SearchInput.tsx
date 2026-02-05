@@ -13,6 +13,7 @@ import { DATA_TYPE_FILTERS, DATA_TYPE_IDS } from "@/lib/data-filters";
 
 const PLACEHOLDER_EXAMPLES = [
   "Air quality in Oakland",
+  "PM2.5 in NYC",
   "Weather stations near San Francisco",
   "Ocean buoys in the Pacific",
   "River sensors with water temperature",
@@ -207,10 +208,10 @@ export default function SearchInput({
   const formClass =
     variant === "inline"
       ? "flex w-full min-w-0 flex-1 flex-col gap-0 rounded-lg border border-black/10 bg-black/5 transition focus-within:border-black/20 focus-within:bg-black/[0.07] dark:border-white/10 dark:bg-white/5 dark:focus-within:border-white/20 dark:focus-within:bg-white/[0.07]"
-      : "flex w-full max-w-2xl flex-col gap-0 rounded-xl border border-black/15 bg-black/[0.07] shadow-lg shadow-black/20 transition focus-within:border-black/25 focus-within:bg-black/10 focus-within:shadow-xl focus-within:shadow-black/25 dark:border-white/15 dark:bg-white/[0.07] dark:focus-within:border-white/25 dark:focus-within:bg-white/9 dark:focus-within:shadow-black/25";
+      : "flex w-full max-w-2xl flex-col gap-0 rounded-xl border border-black/15 bg-black/[0.07] shadow-sm shadow-black/10 transition focus-within:border-black/25 focus-within:bg-black/10 focus-within:shadow-md focus-within:shadow-black/15 dark:border-white/15 dark:bg-white/[0.07] dark:shadow-black/20 dark:focus-within:border-white/25 dark:focus-within:bg-white/9 dark:focus-within:shadow-md dark:focus-within:shadow-black/25";
 
   return (
-    <form onSubmit={handleSubmit} className={formClass}>
+    <form onSubmit={handleSubmit} className={formClass} autoComplete="off">
       {/* Text input - compact single line */}
       <div
         className={
@@ -220,6 +221,7 @@ export default function SearchInput({
         <input
           type="text"
           name="q"
+          autoComplete="off"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={PLACEHOLDER_EXAMPLES[placeholderIndex]}

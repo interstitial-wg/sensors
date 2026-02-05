@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import SearchInput from "@/components/SearchInput";
 import { buildAssistantReply } from "@/lib/assistant-reply";
+import { filterSensorsByBounds } from "@/lib/sensors-api";
 import type { Sensor } from "@/lib/types";
 
 const STREAM_LINE_DELAY_MS = 180;
@@ -36,7 +37,7 @@ function renderWithBold(text: string) {
 function ComputingBubble({ phase }: { phase: string }) {
   const label = PHASE_LABELS[phase] ?? "Working…";
   return (
-    <div className="max-w-[90%] rounded-2xl border border-black/10 px-4 py-2.5 text-sm text-foreground/95 dark:border-white/10 dark:text-white/95 animate-computing-pulse">
+    <div className="max-w-[90%] rounded-2xl border border-black/10 bg-[#f0eeeb] px-4 py-2.5 text-sm text-foreground dark:border-white/10 dark:bg-[#1a1a1a] dark:text-white animate-computing-pulse">
       <p>{label}</p>
     </div>
   );
@@ -121,7 +122,7 @@ function AssistantBubble({
   return (
     <div
       ref={bubbleRef}
-      className="max-w-[90%] rounded-2xl bg-[#f0eeeb]/95 px-4 py-2.5 text-sm text-foreground/95 dark:bg-[#0f0f0f]/80 dark:text-white/95"
+      className="max-w-[90%] rounded-2xl bg-[#f0eeeb] px-4 py-2.5 text-sm text-foreground dark:bg-[#1a1a1a] dark:text-white"
     >
       <p className="whitespace-pre-wrap">
         {displayedLines.map((line, i) => (
@@ -169,6 +170,21 @@ export interface ExplorerChatPanelProps {
   initialSearch?: string;
   hasLocationCoords?: boolean;
   isFindingLocation?: boolean;
+  /** When false, block build until location fetch completes (avoids stale data from previous city). */
+  locationDataReady?: boolean;
+  /** Key of location for which we have sensor data (set when fetch completes). */
+  sensorsLocationKey?: string | null;
+  /** Current location key from URL. Build only when sensorsLocationKey === currentLocationKey. */
+  currentLocationKey?: string | null;
+  /** When set, only build reply when sensors fall within these bounds (avoids stale viewport data). */
+  locationBounds?: {
+    west: number;
+    south: number;
+    east: number;
+    north: number;
+  } | null;
+  /** Called after adding user message from initialSearch — parent can clear q from URL to reset input. */
+  onInitialSearchConsumed?: () => void;
 }
 
 export default function ExplorerChatPanel({
@@ -184,6 +200,11 @@ export default function ExplorerChatPanel({
   initialSearch = "",
   hasLocationCoords = false,
   isFindingLocation = false,
+  locationDataReady = true,
+  sensorsLocationKey = null,
+  currentLocationKey = null,
+  locationBounds = null,
+  onInitialSearchConsumed,
 }: ExplorerChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<
@@ -194,14 +215,19 @@ export default function ExplorerChatPanel({
   const pendingSearchRef = useRef(false);
   const sensorsRef = useRef(sensors);
   sensorsRef.current = sensors;
+  const lastAddedInitialSearchRef = useRef<string | null>(null);
 
-  // When landing from home page with search params, add user message so assistant flow runs
+  // When landing with search params (from home or after explorer search), add user message.
+  // Must run after navigation so we have the new URL — adding before nav causes build with old location's data.
+  // Use ref to prevent duplicate adds (e.g. React Strict Mode double-mount or effect re-runs).
   useEffect(() => {
-    if (messages.length === 0 && initialSearch && hasLocationCoords) {
-      setMessages([{ role: "user", content: initialSearch }]);
-      pendingSearchRef.current = true;
-    }
-  }, [initialSearch, hasLocationCoords, messages.length]);
+    if (!initialSearch) return;
+    if (lastAddedInitialSearchRef.current === initialSearch) return;
+    lastAddedInitialSearchRef.current = initialSearch;
+    setMessages((prev) => [...prev, { role: "user", content: initialSearch }]);
+    pendingSearchRef.current = true;
+    onInitialSearchConsumed?.();
+  }, [initialSearch, onInitialSearchConsumed]);
 
   const handleSearchSubmit = useCallback(
     (query: string, selectedTypes: Set<string>) => {
@@ -209,10 +235,8 @@ export default function ExplorerChatPanel({
         query: query.trim() || "Show sensors",
         selectedTypes: [...selectedTypes],
       });
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", content: query.trim() || "Show sensors" },
-      ]);
+      // Don't add user message here — parent navigates first, adds q to URL, then we add via initialSearch.
+      // Adding before navigation causes build with old URL's data (same results for every city).
       pendingSearchRef.current = true;
       onSearchSubmit?.(query, selectedTypes);
     },
@@ -234,9 +258,20 @@ export default function ExplorerChatPanel({
     else if (loadingSensors) setComputingPhase("looking_for_sensors");
   }, [isFindingLocation, loadingSensors]);
 
-  // When loading completes and we have a user message at the end, build assistant reply.
-  // Run with whatever sensors we have (viewport or location) — don't wait for location fetch,
-  // so we show results immediately like before (viewport sensors cover Oakland/SF Bay).
+  // Show ComputingBubble while finding location or loading sensors
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== "user") return;
+    if (!isFindingLocation && !loadingSensors) return;
+    if (messages.some((m) => m.content === COMPUTING_PLACEHOLDER)) return;
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: COMPUTING_PLACEHOLDER },
+    ]);
+  }, [messages, isFindingLocation, loadingSensors]);
+
+  // Build reply when location fetch completes — use same sensors as map for consistency
   useEffect(() => {
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = loadingSensors;
@@ -248,16 +283,23 @@ export default function ExplorerChatPanel({
       wasLoading,
       pendingSearch: pendingSearchRef.current,
       sensorCount: sensorsRef.current.length,
+      isFindingLocation,
     });
 
     if (messages.length === 0) return;
     const last = messages[messages.length - 1];
-    if (last.role !== "user") {
-      console.log("[ExplorerChatPanel] skipping: last message is not user");
-      return;
-    }
-    if (loadingSensors) {
-      console.log("[ExplorerChatPanel] skipping: still loading sensors");
+    const lastIsUser = last.role === "user";
+    const lastIsComputing =
+      last.role === "assistant" && last.content === COMPUTING_PLACEHOLDER;
+    if (!lastIsUser && !lastIsComputing) return;
+    if (isFindingLocation) return;
+    if (loadingSensors) return;
+    if (hasLocationCoords && !locationDataReady) return;
+    if (
+      hasLocationCoords &&
+      currentLocationKey != null &&
+      sensorsLocationKey !== currentLocationKey
+    ) {
       return;
     }
     if (!wasLoading && !pendingSearchRef.current) {
@@ -272,8 +314,25 @@ export default function ExplorerChatPanel({
     cancelBuildRef.current?.();
     cancelBuildRef.current = null;
 
-    const userQuery = last.content;
-    const sensorsToUse = sensorsRef.current;
+    const userQuery = lastIsUser
+      ? last.content
+      : messages[messages.length - 2]?.role === "user"
+        ? messages[messages.length - 2].content
+        : last.content;
+    let sensorsToUse = sensorsRef.current;
+    // When searching a location, only build if sensors are actually in that area.
+    // Avoids building with stale viewport data (e.g. 496 from SF) before Dallas fetch completes.
+    if (locationBounds && sensorsToUse.length > 0) {
+      const inBounds = filterSensorsByBounds(sensorsToUse, locationBounds);
+      if (inBounds.length === 0) {
+        console.log(
+          "[ExplorerChatPanel] skipping build: sensors not in location bounds (stale viewport data)",
+          { total: sensorsToUse.length, inBounds: 0 },
+        );
+        return;
+      }
+      sensorsToUse = inBounds;
+    }
     let cancelled = false;
     cancelBuildRef.current = () => {
       cancelled = true;
@@ -351,10 +410,12 @@ export default function ExplorerChatPanel({
         });
     };
 
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", content: COMPUTING_PLACEHOLDER },
-    ]);
+    if (lastIsUser) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: COMPUTING_PLACEHOLDER },
+      ]);
+    }
     runReply();
     return () => {
       // Don't cancel here - effect re-runs when we add COMPUTING_PLACEHOLDER, which would wrongly discard the reply.
@@ -367,6 +428,11 @@ export default function ExplorerChatPanel({
     locationFetchUsedFallback,
     requestedDataTypes,
     hasLocationCoords,
+    isFindingLocation,
+    locationDataReady,
+    sensorsLocationKey,
+    currentLocationKey,
+    locationBounds,
   ]);
 
   useEffect(() => {
@@ -380,7 +446,7 @@ export default function ExplorerChatPanel({
     "—";
 
   return (
-    <div className="flex h-full min-h-0 flex-col text-foreground dark:text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.3)] dark:[text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
+    <div className="flex h-full min-h-0 flex-col text-foreground dark:text-white dark:[text-shadow:0_1px_2px_rgba(0,0,0,0.8)]">
       {/* Content - transparent, map shows through; messages anchor above input */}
       <div className="scrollbar-hide flex min-h-0 flex-1 flex-col justify-end overflow-y-auto p-4">
         {focusSensor ? (
@@ -481,7 +547,7 @@ export default function ExplorerChatPanel({
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 {m.role === "user" ? (
-                  <div className="max-w-[90%] rounded-2xl bg-black/15 px-4 py-2.5 text-sm text-foreground dark:bg-white/20 dark:text-white">
+                  <div className="max-w-[90%] rounded-2xl bg-[#F7E6D2] px-4 py-2.5 text-sm text-foreground [text-shadow:none] dark:bg-[#2d2d2d] dark:text-white">
                     <p className="whitespace-pre-wrap">{m.content}</p>
                   </div>
                 ) : m.content === COMPUTING_PLACEHOLDER ? (

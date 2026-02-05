@@ -14,30 +14,78 @@ export interface ParsedQuery {
   searchText: string;
 }
 
-/** Keywords/phrases that map to data type ids. Order matters: longer phrases first. */
+/**
+ * Comprehensive keywords for each Data filter option (AQI, Temperature, Humidity, Wave height, Wind, Water quality).
+ * Order matters: longer phrases first to avoid short terms matching inside longer ones.
+ */
 const DATA_TYPE_KEYWORDS: { pattern: RegExp | string; ids: string[] }[] = [
+  // AQI / Air quality
   { pattern: /\bair\s+quality\b/i, ids: ["aqi"] },
+  { pattern: /\bair\s+pollution\b/i, ids: ["aqi"] },
+  { pattern: /\bparticulate\s+matter\b/i, ids: ["aqi"] },
+  { pattern: /\bparticulate\b/i, ids: ["aqi"] },
   { pattern: /\baqi\b/i, ids: ["aqi"] },
+  { pattern: /\bpm\s*2\s*\.?\s*5\b/i, ids: ["aqi"] },
   { pattern: /\bpm2\.?5\b/i, ids: ["aqi"] },
+  { pattern: /\bpm2\b/i, ids: ["aqi"] },
   { pattern: /\bpm10\b/i, ids: ["aqi"] },
+  { pattern: /\bpm\s*10\b/i, ids: ["aqi"] },
+  { pattern: /\bpurpleair\b/i, ids: ["aqi"] },
+  { pattern: /\bairnow\b/i, ids: ["aqi"] },
+  { pattern: /\bsmoke\b/i, ids: ["aqi"] },
+  { pattern: /\bwildfire\b/i, ids: ["aqi"] },
+  // Wave height
   { pattern: /\bwave\s+height\b/i, ids: ["wave_height"] },
+  { pattern: /\bwave\s+heights?\b/i, ids: ["wave_height"] },
   { pattern: /\bwaves?\b/i, ids: ["wave_height"] },
+  { pattern: /\bswell\b/i, ids: ["wave_height"] },
+  { pattern: /\bseas?\b/i, ids: ["wave_height"] },
+  { pattern: /\bsurf\b/i, ids: ["wave_height"] },
   { pattern: /\bbuoy\b/i, ids: ["wave_height", "wind"] },
   { pattern: /\bbuoys\b/i, ids: ["wave_height", "wind"] },
   { pattern: /\bocean\b/i, ids: ["wave_height", "wind"] },
+  { pattern: /\bmarine\b/i, ids: ["wave_height", "wind"] },
+  { pattern: /\bndbc\b/i, ids: ["wave_height", "wind"] },
+  // Water quality
   { pattern: /\bwater\s+quality\b/i, ids: ["water_quality"] },
   { pattern: /\bdissolved\s+oxygen\b/i, ids: ["water_quality"] },
+  { pattern: /\bdo\s+level\b/i, ids: ["water_quality"] },
   { pattern: /\bturbidity\b/i, ids: ["water_quality"] },
+  { pattern: /\bstream\b/i, ids: ["water_quality", "temperature"] },
+  { pattern: /\bstreams?\b/i, ids: ["water_quality", "temperature"] },
   { pattern: /\briver\b/i, ids: ["water_quality", "temperature"] },
   { pattern: /\brivers?\b/i, ids: ["water_quality", "temperature"] },
+  { pattern: /\bhydrology\b/i, ids: ["water_quality"] },
+  { pattern: /\busgs\b/i, ids: ["water_quality", "temperature"] },
+  { pattern: /\bwqp\b/i, ids: ["water_quality"] },
+  // Humidity
   { pattern: /\bhumidity\b/i, ids: ["humidity"] },
+  { pattern: /\brelative\s+humidity\b/i, ids: ["humidity"] },
+  { pattern: /\brh\b/i, ids: ["humidity"] },
+  { pattern: /\bmoisture\b/i, ids: ["humidity"] },
+  { pattern: /\bdew\s+point\b/i, ids: ["humidity"] },
+  // Temperature
   { pattern: /\btemperature\b/i, ids: ["temperature"] },
+  { pattern: /\btemperatures?\b/i, ids: ["temperature"] },
   { pattern: /\btempature\b/i, ids: ["temperature"] },
   { pattern: /\btempate\b/i, ids: ["temperature"] },
-  { pattern: /\btemp\b/i, ids: ["temperature"] },
+  { pattern: /\btemps?\b/i, ids: ["temperature"] },
+  { pattern: /\bheat\b/i, ids: ["temperature"] },
+  { pattern: /\bcold\b/i, ids: ["temperature"] },
+  { pattern: /\bthermometer\b/i, ids: ["temperature"] },
   { pattern: /\bweather\b/i, ids: ["temperature", "wind"] },
-  { pattern: /\bwind\b/i, ids: ["wind"] },
+  {
+    pattern: /\bweather\s+station\b/i,
+    ids: ["temperature", "wind", "humidity"],
+  },
+  { pattern: /\bfarm\b/i, ids: ["temperature", "humidity"] },
+  // Wind (last to avoid "wind" matching inside "wind speed" etc.)
   { pattern: /\bwind\s+speed\b/i, ids: ["wind"] },
+  { pattern: /\bwind\s+speeds?\b/i, ids: ["wind"] },
+  { pattern: /\bwinds?\b/i, ids: ["wind"] },
+  { pattern: /\bbreeze\b/i, ids: ["wind"] },
+  { pattern: /\bgusts?\b/i, ids: ["wind"] },
+  { pattern: /\banemometer\b/i, ids: ["wind"] },
 ];
 
 /** Location prepositions that often precede a place name */
@@ -72,20 +120,6 @@ const KNOWN_PLACES = new Set([
   "oregon",
   "washington",
 ]);
-
-/** Geocoding fallbacks: try these if the primary location fails */
-const LOCATION_FALLBACKS: Record<string, string> = {
-  "san francisco hays valley": "Hayes Valley, San Francisco",
-  "hays valley san francisco": "Hayes Valley, San Francisco",
-  "sf hayes valley": "Hayes Valley, San Francisco",
-  "san francico": "San Francisco",
-  "san francico ca": "San Francisco",
-  "san francico, ca": "San Francisco",
-  "san dieago": "San Diego",
-  "san dieago ca": "San Diego",
-  "los angelas": "Los Angeles",
-  "los angelas ca": "Los Angeles",
-};
 
 /**
  * Extract a potential location phrase from the query.
@@ -188,36 +222,4 @@ export function parseQuery(query: string): ParsedQuery {
     dataTypeIds,
     searchText,
   };
-}
-
-/** Get a geocoding fallback for a location that may not resolve (e.g. "San Francico" -> "San Francisco") */
-export function getLocationGeocodeFallback(location: string): string | null {
-  const key = location.trim().toLowerCase().replace(/\s+/g, " ");
-  return LOCATION_FALLBACKS[key] ?? null;
-}
-
-/** Common typos for known places - used to correct before geocoding */
-const LOCATION_TYPOS: Record<string, string> = {
-  "san francico": "san francisco",
-  "san dieago": "san diego",
-  "los angelas": "los angeles",
-  "los angles": "los angeles",
-  oaklnad: "oakland",
-  seattel: "seattle",
-};
-
-/** Correct obvious typos in a location string before geocoding */
-export function correctLocationTypo(location: string): string {
-  const lower = location.trim().toLowerCase();
-  for (const [typo, correct] of Object.entries(LOCATION_TYPOS)) {
-    if (lower.includes(typo) || lower === typo) {
-      const re = new RegExp(typo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-      return location.replace(re, (m) =>
-        m[0] === m[0].toUpperCase()
-          ? correct.charAt(0).toUpperCase() + correct.slice(1)
-          : correct,
-      );
-    }
-  }
-  return location;
 }

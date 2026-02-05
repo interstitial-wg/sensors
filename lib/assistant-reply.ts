@@ -13,7 +13,7 @@ const READING_FETCH_TIMEOUT_MS = 12_000;
 /** Measurement keys we can average, grouped by data type */
 const MEASUREMENT_BY_DATA_TYPE: Record<string, string[]> = {
   temperature: ["air_temperature_c", "water_temperature_c"],
-  aqi: ["aqi"],
+  aqi: ["aqi", "pm2_5_ug_per_m3", "pm10_ug_per_m3"],
   humidity: ["relative_humidity_percent"],
   wind: ["wind_speed_mps"],
   wave_height: ["wave_height_m"],
@@ -25,6 +25,8 @@ const MEASUREMENT_LABELS: Record<string, string> = {
   air_temperature_c: "temperature",
   water_temperature_c: "water temperature",
   aqi: "AQI",
+  pm2_5_ug_per_m3: "PM2.5",
+  pm10_ug_per_m3: "PM10",
   relative_humidity_percent: "humidity",
   wind_speed_mps: "wind speed",
   wave_height_m: "wave height",
@@ -32,27 +34,69 @@ const MEASUREMENT_LABELS: Record<string, string> = {
   turbidity_ntu: "turbidity",
 };
 
+/** F→C conversion for PurpleAir temperature_f */
+const FAHRENHEIT_TO_CELSIUS = (f: number) => ((f - 32) * 5) / 9;
+
+/** When API returns °C key but value is in °F range (50–120), convert */
+const F_OR_C = (v: number) =>
+  v >= 50 && v <= 120 ? FAHRENHEIT_TO_CELSIUS(v) : v;
+
 function extractNumericValue(
   measurements: Record<string, unknown>,
   keys: string[],
+  conversions?: Record<string, (v: number) => number>,
 ): number | null {
   for (const key of keys) {
     const v = measurements[key];
-    if (typeof v === "number" && !Number.isNaN(v)) return v;
-    if (typeof v === "string") {
-      const n = parseFloat(v);
-      if (!Number.isNaN(n)) return n;
+    let n: number | null = null;
+    if (typeof v === "number" && !Number.isNaN(v)) n = v;
+    else if (typeof v === "string") n = parseFloat(v);
+    if (n != null && !Number.isNaN(n)) {
+      const conv = conversions?.[key];
+      return conv ? conv(n) : n;
     }
   }
   return null;
 }
+
+/** Alternate keys APIs may use for the same measurement (e.g. pm25 vs pm2_5_ug_per_m3) */
+const MEASUREMENT_KEY_ALIASES: Record<string, string[]> = {
+  air_temperature_c: [
+    "air_temperature_c",
+    "temperature_c",
+    "temp_c",
+    "temperature_f", // PurpleAir: Fahrenheit → convert
+    "temperature", // PurpleAir often uses "temperature" for °F
+    "temp_f",
+  ],
+  relative_humidity_percent: [
+    "relative_humidity_percent",
+    "humidity",
+    "humidity_percent",
+    "rh",
+  ],
+  pm2_5_ug_per_m3: [
+    "pm2_5_ug_per_m3",
+    "pm25",
+    "pm2.5",
+    "pm2_5",
+    "pm2_5_ug_per_m3_10min",
+    "pm2_5_ug_per_m3_1hr",
+  ],
+  pm10_ug_per_m3: [
+    "pm10_ug_per_m3",
+    "pm10",
+    "pm10_ug_per_m3_10min",
+    "pm10_ug_per_m3_1hr",
+  ],
+};
 
 /** Map sensor_type to data type labels for "available" suggestion */
 const SENSOR_TYPE_TO_DATA_TYPES: Record<string, string[]> = {
   weather_station: ["temperature", "humidity", "wind"],
   buoy: ["temperature", "wind", "wave height"],
   river_sensor: ["temperature", "water quality"],
-  air_quality_monitor: ["AQI"],
+  air_quality_monitor: ["AQI", "PM2.5", "PM10", "temperature", "humidity"],
 };
 
 /**
@@ -192,6 +236,8 @@ export async function buildAssistantReply(
     air_temperature_c: "°C",
     water_temperature_c: "°C",
     aqi: "",
+    pm2_5_ug_per_m3: " µg/m³",
+    pm10_ug_per_m3: " µg/m³",
     relative_humidity_percent: "%",
     wind_speed_mps: " m/s",
     wave_height_m: " m",
@@ -203,6 +249,8 @@ export async function buildAssistantReply(
     "air_temperature_c",
     "water_temperature_c",
     "aqi",
+    "pm2_5_ug_per_m3",
+    "pm10_ug_per_m3",
     "relative_humidity_percent",
     "wind_speed_mps",
     "wave_height_m",
@@ -224,7 +272,20 @@ export async function buildAssistantReply(
     if (!reading?.reading?.measurements) continue;
     const m = reading.reading.measurements as Record<string, unknown>;
     for (const key of allMeasurementKeys) {
-      const val = extractNumericValue(m, [key]);
+      const keysToTry = MEASUREMENT_KEY_ALIASES[key] ?? [key];
+      // PurpleAir uses °F; some APIs mislabel °F as air_temperature_c
+      const conversions =
+        key === "air_temperature_c"
+          ? {
+              temperature_f: FAHRENHEIT_TO_CELSIUS,
+              temperature: FAHRENHEIT_TO_CELSIUS,
+              temp_f: FAHRENHEIT_TO_CELSIUS,
+              air_temperature_c: F_OR_C,
+              temperature_c: F_OR_C,
+              temp_c: F_OR_C,
+            }
+          : undefined;
+      const val = extractNumericValue(m, keysToTry, conversions);
       if (val != null) {
         valuesByKey[key].sum += val;
         valuesByKey[key].count += 1;
@@ -270,7 +331,7 @@ export async function buildAssistantReply(
     .map(
       (id) =>
         ({
-          aqi: "air quality (AQI)",
+          aqi: "air quality (AQI / PM2.5)",
           temperature: "temperature",
           humidity: "humidity",
           wind: "wind",
@@ -291,7 +352,7 @@ export async function buildAssistantReply(
 
   const lines: string[] = [];
 
-  const totalSensorsLine = `We found **${count}** sensors in the area.`;
+  const totalSensorsLine = `We found **${count}** sensors in the area (shown on map).`;
   const respondedLine = `**${respondedCount}** returned readings we could use.`;
 
   if (requestedButNotAvailable) {

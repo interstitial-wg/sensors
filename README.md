@@ -13,8 +13,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Data source
 
-- **Default:** Built-in placeholder data (no API required). Sensor types: `buoy`, `river_sensor`, `weather_station`, `air_quality_monitor`.
-- **Live API:** Set `NEXT_PUBLIC_SENSORS_API_URL` (e.g. `http://localhost:3001`) to use the Sensors REST API. See [services/sensors/overview](http://localhost:3002/services/sensors/overview) for the API schema.
+Set `NEXT_PUBLIC_SENSORS_API_URL` (e.g. `http://localhost:3001`) and `NEXT_PUBLIC_SENSORS_API_KEY` to use the Sensors REST API. See [services/sensors/overview](http://localhost:3002/services/sensors/overview) for the API schema.
 
 Copy `.env.example` to `.env.local` and adjust if needed.
 
@@ -22,4 +21,4 @@ Copy `.env.example` to `.env.local` and adjust if needed.
 
 - Next.js (App Router), TypeScript, Tailwind
 - Map: MapLibre GL via `react-map-gl/maplibre`
-- Data: `lib/sensors-api.ts` (placeholder or `GET /api/v1/sensors`)
+- Data: `lib/sensors-api.ts` (`GET /api/v1/sensors`)

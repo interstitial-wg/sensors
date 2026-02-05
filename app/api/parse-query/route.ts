@@ -26,7 +26,15 @@ const SYSTEM_PROMPT = `You extract structured data from sensor search queries. R
   "location": "place name to geocode, or null if no location",
   "dataTypeIds": ["aqi", "temperature", ...]
 }
-Valid dataTypeIds: ${DATA_TYPE_OPTIONS.join(", ")}. Use only these. Infer from query: "air quality"/"AQI"/"pm2.5" -> aqi; "temp"/"temperature"/"weather" -> temperature; "humidity" -> humidity; "wind" -> wind; "waves"/"buoy"/"ocean" -> wave_height; "water quality"/"river" -> water_quality. Return empty array if no types inferred.`;
+Location rules: Correct misspellings to the intended place (e.g. San Franicsco→San Francisco, Los Angelas→Los Angeles). Return the properly spelled name for geocoding. Include state/country when obvious (e.g. "San Francisco, CA").
+Valid dataTypeIds: ${DATA_TYPE_OPTIONS.join(", ")}. Use only these. Infer from query:
+- aqi: air quality, air pollution, AQI, pm2.5, pm2, PM2.5, particulate, pm10, PurpleAir, AirNow, smoke, wildfire
+- temperature: temp, temperature, heat, cold, weather, weather station, farm
+- humidity: humidity, relative humidity, RH, moisture, dew point
+- wave_height: waves, wave height, swell, sea, surf, buoy, buoys, ocean, marine, NDBC
+- wind: wind, wind speed, breeze, gusts, anemometer
+- water_quality: water quality, dissolved oxygen, DO, turbidity, river, stream, hydrology, USGS, WQP
+Return empty array if no types inferred.`;
 
 function fallbackResponse(query: string) {
   const parsed = parseQuery(query);
@@ -91,8 +99,7 @@ export async function POST(request: Request) {
         : undefined;
     const dataTypeIds = Array.isArray(parsed.dataTypeIds)
       ? parsed.dataTypeIds.filter(
-          (id): id is string =>
-            typeof id === "string" && DATA_TYPE_IDS.has(id),
+          (id): id is string => typeof id === "string" && DATA_TYPE_IDS.has(id),
         )
       : [];
 

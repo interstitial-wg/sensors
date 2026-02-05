@@ -3,11 +3,7 @@
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import SearchInput from "@/components/SearchInput";
-import {
-  parseQuery,
-  getLocationGeocodeFallback,
-  correctLocationTypo,
-} from "@/lib/query-parser";
+import { parseQuery } from "@/lib/query-parser";
 import { DATA_TYPE_IDS } from "@/lib/data-filters";
 
 /**
@@ -48,42 +44,52 @@ export default function HomeSearchSection() {
       }
       const location = parsed.location?.trim();
       if (location) {
-        const corrected = correctLocationTypo(location);
-        const fallback = getLocationGeocodeFallback(location);
-        const toTry = [
-          ...new Set([corrected, location, fallback].filter(Boolean)),
-        ] as string[];
-        for (const loc of toTry) {
+        const tryGeocode = async (loc: string) => {
+          const res = await fetch(
+            `/api/geocode?q=${encodeURIComponent(loc)}&countrycodes=us`,
+          );
+          if (!res.ok) return null;
+          const data = (await res.json()) as {
+            lat?: number;
+            lon?: number;
+            boundingbox?: {
+              south: number;
+              north: number;
+              west: number;
+              east: number;
+            };
+          } | null;
+          return data?.lat != null && data?.lon != null ? data : null;
+        };
+
+        let data = await tryGeocode(location);
+        if (!data) {
           try {
-            const res = await fetch(
-              `/api/geocode?q=${encodeURIComponent(loc)}&countrycodes=us`,
-            );
-            if (res.ok) {
-              const data = (await res.json()) as {
-                lat: number;
-                lon: number;
-                display_name?: string;
-                boundingbox?: {
-                  south: number;
-                  north: number;
-                  west: number;
-                  east: number;
-                };
-              } | null;
-              if (data?.lat != null && data?.lon != null) {
-                params.set("lat", String(data.lat));
-                params.set("lon", String(data.lon));
-                if (data.boundingbox) {
-                  params.set("min_lat", String(data.boundingbox.south));
-                  params.set("max_lat", String(data.boundingbox.north));
-                  params.set("min_lon", String(data.boundingbox.west));
-                  params.set("max_lon", String(data.boundingbox.east));
-                }
-                break;
-              }
+            const retryRes = await fetch("/api/parse-query", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ query: `sensors in ${location}` }),
+            });
+            const retryParsed = (await retryRes.json()) as {
+              location?: string;
+            };
+            const correctedLoc = retryParsed.location?.trim();
+            if (correctedLoc && correctedLoc !== location) {
+              data = await tryGeocode(correctedLoc);
             }
           } catch {
-            // Try next fallback
+            // LLM correction failed
+          }
+        }
+
+        if (data) {
+          params.set("lat", String(data.lat));
+          params.set("lon", String(data.lon));
+          if (data.boundingbox) {
+            params.set("min_lat", String(data.boundingbox.south));
+            params.set("max_lat", String(data.boundingbox.north));
+            params.set("min_lon", String(data.boundingbox.west));
+            params.set("max_lon", String(data.boundingbox.east));
           }
         }
       }

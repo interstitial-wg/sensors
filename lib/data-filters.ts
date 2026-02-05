@@ -16,12 +16,17 @@ export const DATA_TYPE_FILTERS: DataTypeFilter[] = [
   {
     id: "temperature",
     label: "Temperature",
-    sensorTypes: ["weather_station", "buoy", "river_sensor"],
+    sensorTypes: [
+      "weather_station",
+      "buoy",
+      "river_sensor",
+      "air_quality_monitor",
+    ],
   },
   {
     id: "humidity",
     label: "Humidity",
-    sensorTypes: ["weather_station"],
+    sensorTypes: ["weather_station", "air_quality_monitor"],
   },
   {
     id: "wave_height",

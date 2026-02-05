@@ -6,10 +6,6 @@
  * List params: search, sensor_type, status, provider, page (default 1), limit (default 20).
  */
 import type { Sensor, SensorsListResponse } from "./types";
-import {
-  PLACEHOLDER_SENSORS,
-  PLACEHOLDER_SENSOR_TYPES,
-} from "./placeholder-sensors";
 
 /** Coerce API lat/long to number | null (PostGIS/node-pg can return strings). */
 function toNum(v: unknown): number | null {
@@ -20,24 +16,34 @@ function toNum(v: unknown): number | null {
 }
 
 function normalizeSensor(s: Record<string, unknown>): Sensor {
+  const lat =
+    toNum(s.latitude) ??
+    toNum(s.lat) ??
+    toNum(
+      (s as { geometry?: { coordinates?: unknown[] } }).geometry
+        ?.coordinates?.[1],
+    );
+  const lon =
+    toNum(s.longitude) ??
+    toNum(s.lon) ??
+    toNum(s.lng) ??
+    toNum(
+      (s as { geometry?: { coordinates?: unknown[] } }).geometry
+        ?.coordinates?.[0],
+    );
   return {
     ...s,
-    latitude: toNum(s.latitude),
-    longitude: toNum(s.longitude),
+    latitude: lat,
+    longitude: lon,
   } as Sensor;
 }
-
-const USE_PLACEHOLDER =
-  typeof process !== "undefined" &&
-  (process.env.NEXT_PUBLIC_USE_PLACEHOLDER_SENSORS === "true" ||
-    !process.env.NEXT_PUBLIC_SENSORS_API_URL);
 
 const API_BASE =
   typeof process !== "undefined"
     ? process.env.NEXT_PUBLIC_SENSORS_API_URL || "http://localhost:3001"
     : "http://localhost:3001";
 
-/** API key from .env (NEXT_PUBLIC_SENSORS_API_KEY). Required when calling the real API. */
+/** API key from .env (NEXT_PUBLIC_SENSORS_API_KEY). Required when calling the Sensors API. */
 const getApiKey = (): string => {
   const key =
     typeof process !== "undefined"
@@ -84,115 +90,11 @@ export interface GetSensorsOptions {
   radius_km?: number;
 }
 
-/**
- * Fetch sensors list. Uses placeholder data when NEXT_PUBLIC_USE_PLACEHOLDER_SENSORS=true
- * or NEXT_PUBLIC_SENSORS_API_URL is unset; otherwise calls GET /api/v1/sensors.
- */
+/** Fetch sensors list. Calls GET /api/v1/sensors. */
 export async function getSensors(
   options: GetSensorsOptions = {},
 ): Promise<SensorsListResponse> {
-  if (USE_PLACEHOLDER) {
-    return getPlaceholderSensors(options);
-  }
   return fetchApiSensors(options);
-}
-
-/** Haversine distance in km */
-function haversineKm(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function getPlaceholderSensors(
-  options: GetSensorsOptions,
-): Promise<SensorsListResponse> {
-  const {
-    sensor_type,
-    status,
-    search,
-    provider,
-    page = 1,
-    limit = 100,
-    min_lat,
-    min_lon,
-    max_lat,
-    max_lon,
-    lat,
-    lon,
-    radius_km = 50,
-  } = options;
-  let list = [...PLACEHOLDER_SENSORS];
-
-  if (sensor_type) {
-    list = list.filter((s) => s.sensor_type === sensor_type);
-  }
-  if (status) {
-    list = list.filter((s) => s.status === status);
-  }
-  if (provider) {
-    const slugs = provider.split(",").map((p) => p.trim().toLowerCase());
-    list = list.filter((s) => {
-      const slug = s.provider_slug?.toLowerCase() ?? "";
-      return slugs.some((p) => slug === p || slug.startsWith(`${p}_`));
-    });
-  }
-  if (search?.trim()) {
-    const q = search.trim().toLowerCase();
-    list = list.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        (s.description?.toLowerCase().includes(q) ?? false) ||
-        s.sensor_type.toLowerCase().includes(q) ||
-        s.provider_name?.toLowerCase().includes(q) ||
-        s.feed_name?.toLowerCase().includes(q),
-    );
-  }
-
-  // Location filters (match real API behavior)
-  const hasBbox =
-    min_lat != null && min_lon != null && max_lat != null && max_lon != null;
-  if (hasBbox) {
-    list = list.filter(
-      (s) =>
-        s.latitude != null &&
-        s.longitude != null &&
-        s.latitude >= min_lat! &&
-        s.latitude <= max_lat! &&
-        s.longitude >= min_lon! &&
-        s.longitude <= max_lon!,
-    );
-  } else if (lat != null && lon != null) {
-    list = list.filter((s) => {
-      if (s.latitude == null || s.longitude == null) return false;
-      return haversineKm(lat, lon, s.latitude, s.longitude) <= radius_km;
-    });
-  }
-
-  const total = list.length;
-  const start = (page - 1) * limit;
-  const sensors = list.slice(start, start + limit);
-
-  return Promise.resolve({
-    sensors,
-    pagination: {
-      page,
-      limit,
-      total,
-      total_pages: Math.ceil(total / limit) || 1,
-    },
-  });
 }
 
 async function fetchApiSensors(
@@ -227,11 +129,13 @@ async function fetchApiSensors(
       );
   }
 
-  const url = `${API_BASE}/api/v1/sensors?${params.toString()}`;
-  const apiKey = getApiKey();
+  const inBrowser = typeof window !== "undefined";
+  const url = inBrowser
+    ? `/api/sensors?${params.toString()}`
+    : `${API_BASE}/api/v1/sensors?${params.toString()}`;
 
   const res = await fetch(url, {
-    headers: { "x-api-key": apiKey },
+    headers: inBrowser ? {} : { "x-api-key": getApiKey() },
     cache: "no-store",
   });
 
@@ -257,13 +161,12 @@ async function fetchApiSensors(
  * Returns null when not found (404).
  */
 export async function getSensor(id: string): Promise<Sensor | null> {
-  if (USE_PLACEHOLDER) {
-    const sensor = PLACEHOLDER_SENSORS.find((s) => s.id === id);
-    return sensor ?? null;
-  }
-  const url = `${API_BASE}/api/v1/sensors/${encodeURIComponent(id)}`;
+  const inBrowser = typeof window !== "undefined";
+  const url = inBrowser
+    ? `/api/sensors/${encodeURIComponent(id)}`
+    : `${API_BASE}/api/v1/sensors/${encodeURIComponent(id)}`;
   const res = await fetch(url, {
-    headers: { "x-api-key": getApiKey() },
+    headers: inBrowser ? {} : { "x-api-key": getApiKey() },
     cache: "no-store",
   });
   if (res.status === 404) return null;
@@ -292,53 +195,6 @@ export interface LatestReadingResponse {
 const noReadingCache = new Set<string>();
 const MAX_NO_READING_CACHE = 500;
 
-/** Mock measurements by sensor type for placeholder mode */
-function mockReadingForSensor(sensor: Sensor): LatestReadingResponse {
-  const base = {
-    sensor_id: sensor.id,
-    external_id: sensor.external_id,
-    name: sensor.name,
-    reading: {
-      id: `reading-${sensor.id}`,
-      timestamp: sensor.last_reading_at ?? new Date().toISOString(),
-      measurements: {} as Record<string, unknown>,
-    },
-  };
-  switch (sensor.sensor_type) {
-    case "buoy":
-      base.reading.measurements = {
-        wave_height_m: 1.2 + Math.random() * 2,
-        water_temperature_c: 15 + Math.random() * 10,
-        wind_speed_mps: 3 + Math.random() * 8,
-      };
-      break;
-    case "river_sensor":
-      base.reading.measurements = {
-        water_temperature_c: 12 + Math.random() * 15,
-        dissolved_oxygen_mg_per_l: 7 + Math.random() * 4,
-        turbidity_ntu: 2 + Math.random() * 20,
-      };
-      break;
-    case "weather_station":
-      base.reading.measurements = {
-        air_temperature_c: 15 + Math.random() * 20,
-        relative_humidity_percent: 40 + Math.random() * 50,
-        wind_speed_mps: 1 + Math.random() * 5,
-      };
-      break;
-    case "air_quality_monitor":
-      base.reading.measurements = {
-        pm2_5_ug_per_m3: 5 + Math.random() * 40,
-        pm10_ug_per_m3: 10 + Math.random() * 60,
-        aqi: 25 + Math.floor(Math.random() * 100),
-      };
-      break;
-    default:
-      base.reading.measurements = { value: 1 + Math.random() * 10 };
-  }
-  return base;
-}
-
 /**
  * Fetch the latest reading for a sensor.
  * In the browser, uses our proxy (/api/sensors/:id/readings/latest) to avoid 404 console spam
@@ -347,10 +203,6 @@ function mockReadingForSensor(sensor: Sensor): LatestReadingResponse {
 export async function getLatestReading(
   sensorId: string,
 ): Promise<LatestReadingResponse | null> {
-  if (USE_PLACEHOLDER) {
-    const sensor = PLACEHOLDER_SENSORS.find((s) => s.id === sensorId);
-    return sensor ? mockReadingForSensor(sensor) : null;
-  }
   if (noReadingCache.has(sensorId)) {
     return null;
   }
@@ -385,17 +237,15 @@ export async function getLatestReading(
   return data as LatestReadingResponse;
 }
 
-/**
- * Fetch distinct sensor types. Uses placeholder list when using placeholder data;
- * otherwise GET /api/v1/sensors/types.
- */
+/** Fetch distinct sensor types. GET /api/v1/sensors/types. */
 export async function getSensorTypes(): Promise<string[]> {
-  if (USE_PLACEHOLDER) {
-    return Promise.resolve([...PLACEHOLDER_SENSOR_TYPES]);
-  }
-  const url = `${API_BASE}/api/v1/sensors/types`;
+  const inBrowser = typeof window !== "undefined";
+  const url = inBrowser
+    ? "/api/sensors/types"
+    : `${API_BASE}/api/v1/sensors/types`;
   const res = await fetch(url, {
-    headers: { "x-api-key": getApiKey() },
+    headers: inBrowser ? {} : { "x-api-key": getApiKey() },
+    cache: "no-store",
   });
   if (!res.ok) {
     throw new Error(`Sensors types API error: ${res.status}`);

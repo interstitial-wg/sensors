@@ -10,7 +10,6 @@ import React, {
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getSensors, getLatestReading } from "@/lib/sensors-api";
-import { PLACEHOLDER_SENSORS } from "@/lib/placeholder-sensors";
 import type { Sensor } from "@/lib/types";
 import type { LatestReadingResponse } from "@/lib/sensors-api";
 
@@ -274,7 +273,7 @@ export default function DotGrid({
         if (!cancelled && res.sensors.length > 0) setSensors(res.sensors);
       })
       .catch(() => {
-        if (!cancelled) setSensors(PLACEHOLDER_SENSORS.slice(0, 200));
+        if (!cancelled) setSensors([]);
       });
     return () => {
       cancelled = true;
