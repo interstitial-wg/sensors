@@ -395,6 +395,7 @@ export default function ExplorerChatPanel({
   }, [
     loadingSensors,
     messages,
+    sensors.length,
     sensorsError,
     locationFetchUsedFallback,
     requestedDataTypes,

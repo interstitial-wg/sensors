@@ -153,110 +153,35 @@ export default function SensorMap({
   const geojsonRef = useRef<FeatureCollection | null>(null);
   geojsonRef.current = geojson;
 
-  // Reset mapReady when Map remounts (key changes for new city) so we retry setData
-  const mapKey = fitToLocation ? `loc-${fitToLocation.west}-${fitToLocation.south}` : "default";
-  useEffect(() => {
-    setMapReady(false);
-  }, [mapKey]);
-
-  // Update source data when geojson changes. Retry when mapReady becomes true (map loaded).
+  // Set GeoJSON data on map source. Retry when map may not be ready yet.
   useEffect(() => {
     if (geojson.features.length === 0) return;
-    if (!mapReady) return;
-    const map = mapRef.current?.getMap();
-    if (!map) return;
-    const src = map.getSource(SENSORS_SOURCE_ID) as
-      | { setData: (d: FeatureCollection) => void }
-      | undefined;
-    if (src?.setData) {
+
+    function trySetData() {
+      const map = mapRef.current?.getMap();
+      const src = map ? (map.getSource(SENSORS_SOURCE_ID) as { setData?: (d: FeatureCollection) => void } | undefined) : undefined;
+      if (!map || !src?.setData) return false;
       src.setData(geojson);
-      map.once("idle", () => {
-        if (typeof map.triggerRepaint === "function") map.triggerRepaint();
-        map.resize();
-      });
+      return true;
     }
-  }, [geojson, mapReady]);
+
+    if (trySetData()) return;
+
+    const t1 = setTimeout(() => trySetData(), 100);
+    const t2 = setTimeout(() => trySetData(), 500);
+    const t3 = setTimeout(() => trySetData(), 1500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [geojson]);
 
   const sensorsById = useMemo(() => {
     const byId: Record<string, Sensor> = {};
     sensors.forEach((s) => (byId[s.id] = s));
     return byId;
   }, [sensors]);
-
-  // Force map repaint when sensors load — fixes dots not appearing until console/layout triggers reflow
-  useEffect(() => {
-    if (withCoords.length === 0) return;
-    const map = mapRef.current?.getMap();
-    if (!map) return;
-    let raf2Id: number | null = null;
-    const raf1Id = requestAnimationFrame(() => {
-      raf2Id = requestAnimationFrame(() => {
-        if (typeof map.triggerRepaint === "function") {
-          map.triggerRepaint();
-        }
-        map.resize();
-      });
-    });
-    return () => {
-      cancelAnimationFrame(raf1Id);
-      if (raf2Id != null) cancelAnimationFrame(raf2Id);
-    };
-  }, [withCoords.length]);
-
-  // ResizeObserver: when container resizes (e.g. dev tools open/close), force map resize + repaint
-  useEffect(() => {
-    if (!mapReady) return;
-    const map = mapRef.current?.getMap();
-    if (!map) return;
-    const container = map.getContainer?.();
-    if (!container) return;
-    const ro = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        map.resize();
-        if (typeof map.triggerRepaint === "function") {
-          map.triggerRepaint();
-        }
-      });
-    });
-    ro.observe(container);
-    return () => ro.disconnect();
-  }, [mapReady]);
-
-  // Periodic repaint for first 3s after sensors load — works around MapLibre not rendering until layout reflow
-  useEffect(() => {
-    if (withCoords.length === 0) return;
-    const repaint = () => {
-      const m = mapRef.current?.getMap();
-      if (!m) return;
-      const container = m.getContainer?.();
-      if (container) {
-        // Force layout recalculation — some browsers need this for WebGL to render
-        void container.offsetHeight;
-      }
-      m.resize();
-      if (typeof m.triggerRepaint === "function") m.triggerRepaint();
-    };
-    const interval = setInterval(repaint, 100);
-    const timeout = setTimeout(() => clearInterval(interval), 3000);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, [withCoords.length]);
-
-  // Window resize listener — repaint when viewport changes (e.g. dev tools open/close)
-  useEffect(() => {
-    if (!mapReady) return;
-    const repaint = () => {
-      const m = mapRef.current?.getMap();
-      if (m) {
-        m.resize();
-        if (typeof m.triggerRepaint === "function") m.triggerRepaint();
-      }
-    };
-    window.addEventListener("resize", repaint);
-    return () => window.removeEventListener("resize", repaint);
-  }, [mapReady]);
 
   const handleLoad = useCallback(() => {
     setMapReady(true);
@@ -272,19 +197,11 @@ export default function SensorMap({
         { padding: 48, maxZoom: fitToLocationZoom, duration: 250 },
       );
     }
-    // Set source data on load if we have features (fixes race: sensors arrived before map ready)
+    // Set source data on load if we have features (sensors arrived before map ready)
     const gj = geojsonRef.current;
-    if (gj?.features?.length && gj.features.length > 0) {
-      const src = map.getSource(SENSORS_SOURCE_ID) as
-        | { setData?: (d: FeatureCollection) => void }
-        | undefined;
-      if (src?.setData) {
-        src.setData(gj);
-        map.once("idle", () => {
-          if (typeof map.triggerRepaint === "function") map.triggerRepaint();
-          map.resize();
-        });
-      }
+    if ((gj?.features?.length ?? 0) > 0) {
+      const src = map.getSource(SENSORS_SOURCE_ID) as { setData?: (d: FeatureCollection) => void } | undefined;
+      if (src?.setData) src.setData(gj!);
     }
     const b = map.getBounds();
     onBoundsChange?.({
@@ -293,15 +210,6 @@ export default function SensorMap({
       east: b.getEast(),
       north: b.getNorth(),
     });
-    // Force initial resize + repaint — use multiple delays to catch late layout
-    const repaint = () => {
-      map.resize();
-      if (typeof map.triggerRepaint === "function") map.triggerRepaint();
-    };
-    requestAnimationFrame(repaint);
-    setTimeout(repaint, 100);
-    setTimeout(repaint, 500);
-    setTimeout(repaint, 1000);
   }, [onBoundsChange, fitToLocation, fitToLocationZoom]);
 
   const handleMoveEnd = useCallback(() => {
@@ -501,7 +409,6 @@ export default function SensorMap({
           showCompass={true}
           showZoom={true}
         />
-        {/* Sensors source + layer embedded in map style; we update via setData */}
         {selectedSensor && (
           <Layer
             id="sensors-selected-highlight"

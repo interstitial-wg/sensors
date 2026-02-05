@@ -5,7 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import SensorMap from "@/components/SensorMap";
 import ExplorerChatPanel from "@/components/ExplorerChatPanel";
 import { NavDropdown } from "@/components/NavDropdown";
-import { getSensors, getSensorTypes, getSensor } from "@/lib/sensors-api";
+import {
+  getSensors,
+  getSensorTypes,
+  getSensor,
+  filterSensorsByBounds,
+} from "@/lib/sensors-api";
 import { dataTypesToSensorTypes, DATA_TYPE_IDS } from "@/lib/data-filters";
 import {
   boundsContained,
@@ -507,6 +512,47 @@ export default function ExplorerClient() {
     return hasFocus ? filteredByType : [focusSensor, ...filteredByType];
   }, [filteredByType, focusSensor]);
 
+  // When location search: show only sensors in the search area (relevant dots). Otherwise show all.
+  const fitToLocationBounds = useMemo((): Bounds | null => {
+    if (!hasLocationCoords || locationLat == null || locationLon == null)
+      return null;
+    if (
+      hasLocationBbox &&
+      locationMinLatParam != null &&
+      locationMaxLatParam != null &&
+      locationMinLonParam != null &&
+      locationMaxLonParam != null
+    ) {
+      return {
+        west: parseFloat(locationMinLonParam),
+        south: parseFloat(locationMinLatParam),
+        east: parseFloat(locationMaxLonParam),
+        north: parseFloat(locationMaxLatParam),
+      };
+    }
+    const pad = 0.05;
+    return {
+      west: locationLon - pad,
+      south: locationLat - pad,
+      east: locationLon + pad,
+      north: locationLat + pad,
+    };
+  }, [
+    hasLocationCoords,
+    locationLat,
+    locationLon,
+    hasLocationBbox,
+    locationMinLatParam,
+    locationMaxLatParam,
+    locationMinLonParam,
+    locationMaxLonParam,
+  ]);
+  const sensorsForMap = useMemo(() => {
+    if (!fitToLocationBounds) return sensorsToShow;
+    const inBounds = filterSensorsByBounds(sensorsToShow, fitToLocationBounds);
+    return inBounds.length > 0 ? inBounds : sensorsToShow;
+  }, [sensorsToShow, fitToLocationBounds]);
+
   // Progressive display: reveal sensors center-out in chunks (data is already sorted by distance from center)
   const displaySensors = useMemo(
     () => sensorsToShow.slice(0, progressiveVisibleCount),
@@ -574,10 +620,10 @@ export default function ExplorerClient() {
     locationMaxLonParam,
   ]);
 
-  // Fit map to location when we navigate, then to all sensors when they load (so user sees all dots)
+  // Fit map to location when we navigate, then to filtered sensors when they load
   const fitToSensorsBounds = useMemo(
-    () => (sensorsToShow.length > 0 ? sensorsToBounds(sensorsToShow) : null),
-    [sensorsToShow],
+    () => (sensorsForMap.length > 0 ? sensorsToBounds(sensorsForMap) : null),
+    [sensorsForMap],
   );
   const locationFitKey = hasLocationCoords
     ? `${locationLat}_${locationLon}_${locationBboxKey}`
@@ -727,7 +773,7 @@ export default function ExplorerClient() {
       {/* Map - full viewport, extends under bottom panel */}
       <div className="absolute inset-0">
         <SensorMap
-          sensors={sensorsToShow}
+          sensors={sensorsForMap}
           onBoundsChange={handleBoundsChange}
           fitToSensorsTrigger={fitToSensorsTrigger}
           fitToLocation={fitToLocation}
