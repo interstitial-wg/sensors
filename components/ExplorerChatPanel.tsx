@@ -231,12 +231,14 @@ export default function ExplorerChatPanel({
 
   const handleSearchSubmit = useCallback(
     (query: string, selectedTypes: Set<string>) => {
+      const trimmed = query.trim() || "Show sensors";
       console.log("[ExplorerChatPanel] handleSearchSubmit", {
-        query: query.trim() || "Show sensors",
+        query: trimmed,
         selectedTypes: [...selectedTypes],
       });
-      // Don't add user message here — parent navigates first, adds q to URL, then we add via initialSearch.
-      // Adding before navigation causes build with old URL's data (same results for every city).
+      // Add user message immediately so it appears without waiting for parse/geocode/navigation
+      setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+      lastAddedInitialSearchRef.current = trimmed;
       pendingSearchRef.current = true;
       onSearchSubmit?.(query, selectedTypes);
     },
@@ -276,38 +278,24 @@ export default function ExplorerChatPanel({
     const wasLoading = prevLoadingRef.current;
     prevLoadingRef.current = loadingSensors;
 
-    console.log("[ExplorerChatPanel] build-reply effect", {
-      messagesLength: messages.length,
-      lastRole: messages[messages.length - 1]?.role,
-      loadingSensors,
-      wasLoading,
-      pendingSearch: pendingSearchRef.current,
-      sensorCount: sensorsRef.current.length,
-      isFindingLocation,
-    });
+    const last = messages[messages.length - 1];
+    const lastIsUser = last?.role === "user";
+    const lastIsComputing =
+      last?.role === "assistant" && last?.content === COMPUTING_PLACEHOLDER;
+    const locationKeyMismatch =
+      hasLocationCoords &&
+      currentLocationKey != null &&
+      sensorsLocationKey !== currentLocationKey;
+    const skipNoTransition =
+      !wasLoading && !pendingSearchRef.current;
 
     if (messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    const lastIsUser = last.role === "user";
-    const lastIsComputing =
-      last.role === "assistant" && last.content === COMPUTING_PLACEHOLDER;
     if (!lastIsUser && !lastIsComputing) return;
     if (isFindingLocation) return;
     if (loadingSensors) return;
     if (hasLocationCoords && !locationDataReady) return;
-    if (
-      hasLocationCoords &&
-      currentLocationKey != null &&
-      sensorsLocationKey !== currentLocationKey
-    ) {
-      return;
-    }
-    if (!wasLoading && !pendingSearchRef.current) {
-      console.log(
-        "[ExplorerChatPanel] skipping: no loading transition, no pending search",
-      );
-      return;
-    }
+    if (locationKeyMismatch) return;
+    if (skipNoTransition) return;
     pendingSearchRef.current = false;
 
     // Cancel any in-flight build before starting a new one
@@ -335,11 +323,6 @@ export default function ExplorerChatPanel({
       cancelled = true;
     };
 
-    console.log("[ExplorerChatPanel] starting buildAssistantReply", {
-      userQuery,
-      sensorCount: sensorsToUse.length,
-    });
-
     const runReply = () => {
       if (cancelled) return;
       const steps: string[] = [];
@@ -359,11 +342,6 @@ export default function ExplorerChatPanel({
         },
       })
         .then((reply) => {
-          console.log("[ExplorerChatPanel] buildAssistantReply resolved", {
-            cancelled,
-            replyLength: reply?.length,
-            replyPreview: reply?.slice(0, 80),
-          });
           isBuildingReplyRef.current = false;
           if (!cancelled) {
             setMessages((prev) => {
@@ -384,10 +362,6 @@ export default function ExplorerChatPanel({
           }
         })
         .catch((err) => {
-          console.log("[ExplorerChatPanel] buildAssistantReply rejected", {
-            cancelled,
-            err: err instanceof Error ? err.message : String(err),
-          });
           isBuildingReplyRef.current = false;
           if (!cancelled) {
             const msg =

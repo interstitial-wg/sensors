@@ -7,8 +7,8 @@
  */
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org/search";
-/** Max bbox area (km²) — reject larger (e.g. Bay Area ~18k km²), use radius instead. SF city ~121 km². */
-const MAX_BBOX_AREA_KM2 = 1500;
+/** Max bbox area (km²) — reject larger (e.g. Bay Area ~18k km²). SF city ~2.5k km² (includes water). */
+const MAX_BBOX_AREA_KM2 = 3500;
 
 function bboxAreaKm2(bbox: {
   south: number;
@@ -33,13 +33,18 @@ export async function GET(request: Request) {
   /** Try city-only first when "City, State" or "City, Country" for tighter boundary */
   const cityOnly = q.includes(",") ? q.split(",")[0]!.trim() : null;
 
-  async function fetchGeocode(query: string, countrycodesParam: string | null) {
+  async function fetchGeocode(
+    query: string,
+    countrycodesParam: string | null,
+    featureType?: "city" | "settlement",
+  ) {
     const url = new URL(NOMINATIM_BASE);
     url.searchParams.set("q", query);
     url.searchParams.set("format", "json");
     url.searchParams.set("limit", "1");
     if (countrycodesParam)
       url.searchParams.set("countrycodes", countrycodesParam);
+    if (featureType) url.searchParams.set("featureType", featureType);
 
     const res = await fetch(url.toString(), {
       headers: {
@@ -60,7 +65,10 @@ export async function GET(request: Request) {
   try {
     let first: Awaited<ReturnType<typeof fetchGeocode>> = null;
     if (cityOnly) {
-      first = await fetchGeocode(cityOnly, countrycodes);
+      first = await fetchGeocode(cityOnly, countrycodes, "city");
+    }
+    if (!first && cityOnly) {
+      first = await fetchGeocode(cityOnly, countrycodes, "settlement");
     }
     if (!first) {
       first = await fetchGeocode(q, countrycodes);

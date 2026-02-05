@@ -138,10 +138,10 @@ export default function ExplorerClient() {
           north: locationBbox.max_lat,
         }
       : {
-          west: locationLon - 0.08,
-          south: locationLat - 0.08,
-          east: locationLon + 0.08,
-          north: locationLat + 0.08,
+          west: locationLon - 0.03,
+          south: locationLat - 0.03,
+          east: locationLon + 0.03,
+          north: locationLat + 0.03,
         };
     setBounds(normalizeBounds(b));
   }, [hasLocationCoords, locationLat, locationLon, locationBboxKey]);
@@ -242,7 +242,8 @@ export default function ExplorerClient() {
 
   // When using bbox (viewport), paginate through all pages (up to a cap) so zoomed-out view gets more than 500 sensors
   const BBOX_PAGE_LIMIT = 500;
-  const BBOX_MAX_PAGES = 10; // cap at 5000 sensors per viewport to avoid runaway requests
+  const BBOX_MAX_PAGES = 3; // cap at 1500 from bbox to avoid loading thousands when zoomed out
+  const SENSORS_PER_VIEWPORT_CAP = 1500; // stop fetching and cap display when zoomed out
   // Center+radius fetch (like MCP list_sensors) so we include buoys and other sensors near viewport center (e.g. offshore)
   const CENTER_RADIUS_KM = 150;
 
@@ -270,7 +271,10 @@ export default function ExplorerClient() {
           ? normalizeBounds(bounds)
           : INITIAL_BOUNDS;
 
+    // Skip fetch only when viewport is contained in previous fetch.
+    // When hasLocationCoords (explicit location search), always fetch — user expects data for that location.
     if (
+      !hasLocationCoords &&
       bbox != null &&
       lastFetchedBboxRef.current != null &&
       boundsContained(bbox, lastFetchedBboxRef.current)
@@ -290,6 +294,10 @@ export default function ExplorerClient() {
       setLoadingSensors(false);
       setSensorsError(null);
       setRadiusError(null);
+      if (hasLocationCoords && locationLat != null && locationLon != null) {
+        setLocationDataReady(true);
+        setSensorsLocationKey(`${locationLat}_${locationLon}`);
+      }
       return;
     }
 
@@ -365,8 +373,13 @@ export default function ExplorerClient() {
         }
 
         // When we have a viewport, also fetch by center+radius so we get buoys and offshore sensors.
-        // Paginate radius; when 2+ types selected, run one radius pass per type so we don't truncate one type at 500.
-        if (bbox != null && !cancelled && myFetchId === fetchIdRef.current) {
+        // Skip radius fetch if we already have plenty (avoids 2600+ sensors when zoomed out).
+        if (
+          bbox != null &&
+          accumulated.length < SENSORS_PER_VIEWPORT_CAP &&
+          !cancelled &&
+          myFetchId === fetchIdRef.current
+        ) {
           const center = centerFromBounds(bbox);
           const radiusLimit = 500;
           const typesForRadius =
@@ -413,10 +426,13 @@ export default function ExplorerClient() {
 
         if (myFetchId !== fetchIdRef.current) return;
         const centerBbox = bbox ?? expandedBbox ?? null;
-        const sorted =
+        let sorted =
           centerBbox != null
             ? sortSensorsByCenter(accumulated, centerFromBounds(centerBbox))
             : accumulated;
+        if (sorted.length > SENSORS_PER_VIEWPORT_CAP) {
+          sorted = sorted.slice(0, SENSORS_PER_VIEWPORT_CAP);
+        }
         setAllSensors(sorted);
         setProgressiveVisibleCount(bbox == null ? sorted.length : 0);
         if (cacheKey) {
@@ -540,7 +556,7 @@ export default function ExplorerClient() {
         north: parseFloat(locationMaxLatParam),
       };
     }
-    const pad = 0.055;
+    const pad = 0.03;
     return {
       west: locationLon - pad,
       south: locationLat - pad,
@@ -575,8 +591,10 @@ export default function ExplorerClient() {
     lastFittedSensorsCountRef.current = 0;
     setFitToSensorsTrigger((t) => t + 1);
   }, [locationFitKey]);
+  // When in viewport mode (no location search), re-fit when sensors load so user sees all dots.
+  // When in location-search mode, skip this — stay zoomed on the city instead of zooming out to sensors.
   useEffect(() => {
-    if (!hasLocationCoords || sensorsToShow.length === 0) return;
+    if (hasLocationCoords || sensorsToShow.length === 0) return;
     if (sensorsToShow.length === lastFittedSensorsCountRef.current) return;
     lastFittedSensorsCountRef.current = sensorsToShow.length;
     setFitToSensorsTrigger((t) => t + 1);
@@ -713,7 +731,9 @@ export default function ExplorerClient() {
           onBoundsChange={handleBoundsChange}
           fitToSensorsTrigger={fitToSensorsTrigger}
           fitToLocation={fitToLocation}
-          fitToSensorsBounds={fitToSensorsBounds}
+          fitToSensorsBounds={
+            hasLocationCoords ? null : fitToSensorsBounds
+          }
           fitToLocationZoom={12}
           focusSensorId={focusSensor?.id ?? null}
         />

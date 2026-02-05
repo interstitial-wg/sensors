@@ -153,9 +153,16 @@ export default function SensorMap({
   const geojsonRef = useRef<FeatureCollection | null>(null);
   geojsonRef.current = geojson;
 
-  // Update source data when geojson changes (source is embedded in map style)
+  // Reset mapReady when Map remounts (key changes for new city) so we retry setData
+  const mapKey = fitToLocation ? `loc-${fitToLocation.west}-${fitToLocation.south}` : "default";
+  useEffect(() => {
+    setMapReady(false);
+  }, [mapKey]);
+
+  // Update source data when geojson changes. Retry when mapReady becomes true (map loaded).
   useEffect(() => {
     if (geojson.features.length === 0) return;
+    if (!mapReady) return;
     const map = mapRef.current?.getMap();
     if (!map) return;
     const src = map.getSource(SENSORS_SOURCE_ID) as
@@ -168,7 +175,7 @@ export default function SensorMap({
         map.resize();
       });
     }
-  }, [geojson]);
+  }, [geojson, mapReady]);
 
   const sensorsById = useMemo(() => {
     const byId: Record<string, Sensor> = {};
@@ -255,7 +262,17 @@ export default function SensorMap({
     setMapReady(true);
     const map = mapRef.current?.getMap();
     if (!map || typeof map.getBounds !== "function") return;
-    // Set source data on load if we have features (fixes race: geojson arrived before map ready)
+    // Fit to city immediately when map loads with location in URL (e.g. after search from home)
+    if (fitToLocation && typeof map.fitBounds === "function") {
+      map.fitBounds(
+        [
+          [fitToLocation.west, fitToLocation.south],
+          [fitToLocation.east, fitToLocation.north],
+        ],
+        { padding: 48, maxZoom: fitToLocationZoom, duration: 250 },
+      );
+    }
+    // Set source data on load if we have features (fixes race: sensors arrived before map ready)
     const gj = geojsonRef.current;
     if (gj?.features?.length && gj.features.length > 0) {
       const src = map.getSource(SENSORS_SOURCE_ID) as
@@ -285,7 +302,7 @@ export default function SensorMap({
     setTimeout(repaint, 100);
     setTimeout(repaint, 500);
     setTimeout(repaint, 1000);
-  }, [onBoundsChange]);
+  }, [onBoundsChange, fitToLocation, fitToLocationZoom]);
 
   const handleMoveEnd = useCallback(() => {
     const map = mapRef.current?.getMap();
@@ -353,15 +370,13 @@ export default function SensorMap({
     canvas.style.cursor = hoveredSensor ? "pointer" : "grab";
   }, [hoveredSensor]);
 
-  // Fit map when parent triggers. Prefer sensor bounds (show all) over location when sensors are loaded.
+  // Fit map when parent triggers or when fitToLocation changes (e.g. new city search).
   const lastFittedTriggerRef = useRef(0);
+  const lastFittedLocationKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (fitToSensorsTrigger <= 0) return;
+    if (!mapReady) return;
     const map = mapRef.current?.getMap();
     if (!map || typeof map.fitBounds !== "function") return;
-
-    if (lastFittedTriggerRef.current === fitToSensorsTrigger) return;
-    lastFittedTriggerRef.current = fitToSensorsTrigger;
 
     const scheduleRepaintAfterFit = () => {
       map.once("idle", () => {
@@ -370,6 +385,31 @@ export default function SensorMap({
       });
     };
 
+    // When we have fitToLocation (location search), fit when trigger fires OR when location changes
+    if (fitToLocation) {
+      const locationKey = `${fitToLocation.west}_${fitToLocation.south}_${fitToLocation.east}_${fitToLocation.north}`;
+      const triggerChanged = fitToSensorsTrigger > 0 && lastFittedTriggerRef.current !== fitToSensorsTrigger;
+      const locationChanged = lastFittedLocationKeyRef.current !== locationKey;
+      if (!triggerChanged && !locationChanged) return;
+      if (triggerChanged) lastFittedTriggerRef.current = fitToSensorsTrigger;
+      if (locationChanged) lastFittedLocationKeyRef.current = locationKey;
+
+      map.fitBounds(
+        [
+          [fitToLocation.west, fitToLocation.south],
+          [fitToLocation.east, fitToLocation.north],
+        ],
+        { padding: 48, maxZoom: fitToLocationZoom, duration: 250 },
+      );
+      scheduleRepaintAfterFit();
+      return;
+    }
+
+    // No location search — only fit when trigger fires
+    if (fitToSensorsTrigger <= 0) return;
+    if (lastFittedTriggerRef.current === fitToSensorsTrigger) return;
+    lastFittedTriggerRef.current = fitToSensorsTrigger;
+
     if (fitToSensorsBounds) {
       map.fitBounds(
         [
@@ -377,18 +417,6 @@ export default function SensorMap({
           [fitToSensorsBounds.east, fitToSensorsBounds.north],
         ],
         { padding: 48, maxZoom: 14, duration: 250 },
-      );
-      scheduleRepaintAfterFit();
-      return;
-    }
-
-    if (fitToLocation) {
-      map.fitBounds(
-        [
-          [fitToLocation.west, fitToLocation.south],
-          [fitToLocation.east, fitToLocation.north],
-        ],
-        { padding: 48, maxZoom: fitToLocationZoom, duration: 250 },
       );
       scheduleRepaintAfterFit();
       return;
@@ -415,6 +443,7 @@ export default function SensorMap({
     fitToLocation,
     fitToSensorsBounds,
     fitToLocationZoom,
+    mapReady,
   ]);
 
   // Fit map to and select a specific sensor (e.g. from ?sensor=id in URL)
@@ -437,23 +466,28 @@ export default function SensorMap({
     setHoveredSensor(sensor);
   }, [focusSensorId, sensorsById]);
 
+  // When we have fitToLocation, start the map centered on the city (fixes map not moving on search)
+  const initialViewState = useMemo(() => {
+    if (fitToLocation) {
+      const lon = (fitToLocation.west + fitToLocation.east) / 2;
+      const lat = (fitToLocation.south + fitToLocation.north) / 2;
+      return { longitude: lon, latitude: lat, zoom: fitToLocationZoom, pitch: 0, bearing: 0 };
+    }
+    return { longitude: -122.27, latitude: 37.8, zoom: 8, pitch: 0, bearing: 0 };
+  }, [fitToLocation, fitToLocationZoom]);
+
   return (
     <div
       ref={containerRef}
       className="sensor-map-minimal relative h-full w-full"
     >
       <Map
+        key={fitToLocation ? `loc-${fitToLocation.west}-${fitToLocation.south}` : "default"}
         ref={mapRef}
         projection="mercator"
-        initialViewState={{
-          longitude: -122.27,
-          latitude: 37.8,
-          zoom: 8,
-          pitch: 0,
-          bearing: 0,
-        }}
+        initialViewState={initialViewState}
         style={{ width: "100%", height: "100%" }}
-        mapStyle={mapStyle}
+        mapStyle={mapStyle as import("maplibre-gl").StyleSpecification}
         styleDiffing={false}
         onLoad={handleLoad}
         onMoveEnd={handleMoveEnd}

@@ -218,8 +218,11 @@ export async function buildAssistantReply(
         setTimeout(() => resolve(null), READING_FETCH_TIMEOUT_MS),
       ),
     ]);
-  const readings = await Promise.all(
+  const settled = await Promise.allSettled(
     sensorsToQuery.map((s) => fetchWithTimeout(s.id)),
+  );
+  const readings = settled.map((r) =>
+    r.status === "fulfilled" ? r.value : null,
   );
 
   const respondedCount = readings.filter(
