@@ -1,12 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Map, {
-  Layer,
-  NavigationControl,
-  Popup,
-  Source,
-} from "react-map-gl/maplibre";
+import Map, { Layer, NavigationControl, Popup } from "react-map-gl/maplibre";
 import type { MapRef } from "react-map-gl/maplibre";
 import type { FeatureCollection } from "geojson";
 import type { Sensor } from "@/lib/types";
@@ -16,58 +11,86 @@ import { useTheme } from "@/components/ThemeProvider";
 
 // Carto basemaps – dark for dark mode, light for light mode
 // If tiles don’t load, switch back to: https://tile.openstreetmap.org/{z}/{x}/{y}.png
-const MAP_STYLE_DARK = {
-  version: 8 as const,
-  sources: {
-    basemap: {
-      type: "raster" as const,
-      tiles: [
-        "https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
-        "https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
-        "https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
-      ],
-      tileSize: 256,
-      attribution: "© CARTO © OSM",
-    },
-  },
-  layers: [
-    {
-      id: "basemap",
-      type: "raster" as const,
-      source: "basemap",
-      minzoom: 0,
-      maxzoom: 20,
-    },
-  ],
-};
-
-const MAP_STYLE_LIGHT = {
-  version: 8 as const,
-  sources: {
-    basemap: {
-      type: "raster" as const,
-      tiles: [
-        "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-        "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-        "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-      ],
-      tileSize: 256,
-      attribution: "© CARTO © OSM",
-    },
-  },
-  layers: [
-    {
-      id: "basemap",
-      type: "raster" as const,
-      source: "basemap",
-      minzoom: 0,
-      maxzoom: 20,
-    },
-  ],
-};
-
 const SENSORS_SOURCE_ID = "sensors";
 const SENSORS_LAYER_ID = "sensors-circles";
+
+const EMPTY_GEOJSON: FeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
+
+function buildMapStyle(
+  basemapTiles: string[],
+  attribution: string,
+): Record<string, unknown> {
+  return {
+    version: 8,
+    sources: {
+      basemap: {
+        type: "raster",
+        tiles: basemapTiles,
+        tileSize: 256,
+        attribution,
+      },
+      [SENSORS_SOURCE_ID]: {
+        type: "geojson",
+        data: EMPTY_GEOJSON,
+        promoteId: "id",
+      },
+    },
+    layers: [
+      {
+        id: "basemap",
+        type: "raster",
+        source: "basemap",
+        minzoom: 0,
+        maxzoom: 20,
+      },
+      {
+        id: SENSORS_LAYER_ID,
+        type: "circle",
+        source: SENSORS_SOURCE_ID,
+        minzoom: 0,
+        paint: {
+          "circle-radius": 8,
+          "circle-color": [
+            "match",
+            ["get", "sensor_type"],
+            "buoy",
+            "#0ea5e9",
+            "river_sensor",
+            "#22c55e",
+            "weather_station",
+            "#eab308",
+            "air_quality_monitor",
+            "#a855f7",
+            "#64748b",
+          ],
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "rgba(255,255,255,0.95)",
+        },
+      },
+    ],
+  };
+}
+
+const MAP_STYLE_DARK = buildMapStyle(
+  [
+    "https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+    "https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+    "https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+  ],
+  "© CARTO © OSM",
+);
+
+const MAP_STYLE_LIGHT = buildMapStyle(
+  [
+    "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+  ],
+  "© CARTO © OSM",
+);
 
 export interface SensorMapProps {
   sensors: Sensor[];
@@ -98,7 +121,9 @@ export default function SensorMap({
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const hasFocusedRef = useRef(false);
   const [hoveredSensor, setHoveredSensor] = useState<Sensor | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<MapRef | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const withCoords = useMemo(
     () =>
@@ -125,16 +150,19 @@ export default function SensorMap({
     return { type: "FeatureCollection" as const, features };
   }, [withCoords]);
 
-  // Explicitly set source data when geojson changes — ensures MapLibre receives update after location search
+  const geojsonRef = useRef<FeatureCollection | null>(null);
+  geojsonRef.current = geojson;
+
+  // Update source data when geojson changes (source is embedded in map style)
   useEffect(() => {
     if (geojson.features.length === 0) return;
     const map = mapRef.current?.getMap();
     if (!map) return;
-    const source = map.getSource(SENSORS_SOURCE_ID) as
+    const src = map.getSource(SENSORS_SOURCE_ID) as
       | { setData: (d: FeatureCollection) => void }
       | undefined;
-    if (source?.setData) {
-      source.setData(geojson);
+    if (src?.setData) {
+      src.setData(geojson);
       map.once("idle", () => {
         if (typeof map.triggerRepaint === "function") map.triggerRepaint();
         map.resize();
@@ -168,10 +196,79 @@ export default function SensorMap({
     };
   }, [withCoords.length]);
 
+  // ResizeObserver: when container resizes (e.g. dev tools open/close), force map resize + repaint
+  useEffect(() => {
+    if (!mapReady) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const container = map.getContainer?.();
+    if (!container) return;
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(() => {
+        map.resize();
+        if (typeof map.triggerRepaint === "function") {
+          map.triggerRepaint();
+        }
+      });
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [mapReady]);
+
+  // Periodic repaint for first 3s after sensors load — works around MapLibre not rendering until layout reflow
+  useEffect(() => {
+    if (withCoords.length === 0) return;
+    const repaint = () => {
+      const m = mapRef.current?.getMap();
+      if (!m) return;
+      const container = m.getContainer?.();
+      if (container) {
+        // Force layout recalculation — some browsers need this for WebGL to render
+        void container.offsetHeight;
+      }
+      m.resize();
+      if (typeof m.triggerRepaint === "function") m.triggerRepaint();
+    };
+    const interval = setInterval(repaint, 100);
+    const timeout = setTimeout(() => clearInterval(interval), 3000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [withCoords.length]);
+
+  // Window resize listener — repaint when viewport changes (e.g. dev tools open/close)
+  useEffect(() => {
+    if (!mapReady) return;
+    const repaint = () => {
+      const m = mapRef.current?.getMap();
+      if (m) {
+        m.resize();
+        if (typeof m.triggerRepaint === "function") m.triggerRepaint();
+      }
+    };
+    window.addEventListener("resize", repaint);
+    return () => window.removeEventListener("resize", repaint);
+  }, [mapReady]);
+
   const handleLoad = useCallback(() => {
-    // Use ref for reliability; evt.target may differ across react-map-gl versions
+    setMapReady(true);
     const map = mapRef.current?.getMap();
     if (!map || typeof map.getBounds !== "function") return;
+    // Set source data on load if we have features (fixes race: geojson arrived before map ready)
+    const gj = geojsonRef.current;
+    if (gj?.features?.length && gj.features.length > 0) {
+      const src = map.getSource(SENSORS_SOURCE_ID) as
+        | { setData?: (d: FeatureCollection) => void }
+        | undefined;
+      if (src?.setData) {
+        src.setData(gj);
+        map.once("idle", () => {
+          if (typeof map.triggerRepaint === "function") map.triggerRepaint();
+          map.resize();
+        });
+      }
+    }
     const b = map.getBounds();
     onBoundsChange?.({
       west: b.getWest(),
@@ -179,6 +276,15 @@ export default function SensorMap({
       east: b.getEast(),
       north: b.getNorth(),
     });
+    // Force initial resize + repaint — use multiple delays to catch late layout
+    const repaint = () => {
+      map.resize();
+      if (typeof map.triggerRepaint === "function") map.triggerRepaint();
+    };
+    requestAnimationFrame(repaint);
+    setTimeout(repaint, 100);
+    setTimeout(repaint, 500);
+    setTimeout(repaint, 1000);
   }, [onBoundsChange]);
 
   const handleMoveEnd = useCallback(() => {
@@ -332,7 +438,10 @@ export default function SensorMap({
   }, [focusSensorId, sensorsById]);
 
   return (
-    <div className="sensor-map-minimal relative h-full w-full">
+    <div
+      ref={containerRef}
+      className="sensor-map-minimal relative h-full w-full"
+    >
       <Map
         ref={mapRef}
         projection="mercator"
@@ -345,6 +454,7 @@ export default function SensorMap({
         }}
         style={{ width: "100%", height: "100%" }}
         mapStyle={mapStyle}
+        styleDiffing={false}
         onLoad={handleLoad}
         onMoveEnd={handleMoveEnd}
         onClick={handleMapClick}
@@ -357,50 +467,21 @@ export default function SensorMap({
           showCompass={true}
           showZoom={true}
         />
-        <Source
-          id={SENSORS_SOURCE_ID}
-          type="geojson"
-          data={geojson}
-          promoteId="id"
-        >
+        {/* Sensors source + layer embedded in map style; we update via setData */}
+        {selectedSensor && (
           <Layer
-            id={SENSORS_LAYER_ID}
+            id="sensors-selected-highlight"
+            source={SENSORS_SOURCE_ID}
             type="circle"
-            minzoom={0}
+            filter={["==", ["get", "id"], selectedSensor.id]}
             paint={{
-              "circle-radius": 5,
-              "circle-color": [
-                "match",
-                ["get", "sensor_type"],
-                "buoy",
-                "#0ea5e9",
-                "river_sensor",
-                "#22c55e",
-                "weather_station",
-                "#eab308",
-                "air_quality_monitor",
-                "#a855f7",
-                "#64748b",
-              ],
-              "circle-stroke-width": 1.5,
-              "circle-stroke-color": "rgba(255,255,255,0.95)",
+              "circle-radius": 7,
+              "circle-color": "#9ab07f",
+              "circle-stroke-width": 2,
+              "circle-stroke-color": "#ffffff",
             }}
           />
-          {/* Highlighted dot for selected/focused sensor - uses site green (#9ab07f) */}
-          {selectedSensor && (
-            <Layer
-              id="sensors-selected-highlight"
-              type="circle"
-              filter={["==", ["get", "id"], selectedSensor.id]}
-              paint={{
-                "circle-radius": 7,
-                "circle-color": "#9ab07f",
-                "circle-stroke-width": 2,
-                "circle-stroke-color": "#ffffff",
-              }}
-            />
-          )}
-        </Source>
+        )}
         {selectedSensor &&
           selectedSensor.latitude != null &&
           selectedSensor.longitude != null && (

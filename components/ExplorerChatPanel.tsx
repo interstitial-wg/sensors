@@ -320,18 +320,15 @@ export default function ExplorerChatPanel({
         ? messages[messages.length - 2].content
         : last.content;
     let sensorsToUse = sensorsRef.current;
-    // When searching a location, only build if sensors are actually in that area.
-    // Avoids building with stale viewport data (e.g. 496 from SF) before Dallas fetch completes.
+    // When searching a location, prefer sensors in the URL bbox to avoid stale viewport data.
+    // If bbox filter would empty the list, use unfiltered sensors — we fetched for this location
+    // (radius fallback can return sensors outside the geocoding bbox).
     if (locationBounds && sensorsToUse.length > 0) {
       const inBounds = filterSensorsByBounds(sensorsToUse, locationBounds);
-      if (inBounds.length === 0) {
-        console.log(
-          "[ExplorerChatPanel] skipping build: sensors not in location bounds (stale viewport data)",
-          { total: sensorsToUse.length, inBounds: 0 },
-        );
-        return;
+      if (inBounds.length > 0) {
+        sensorsToUse = inBounds;
       }
-      sensorsToUse = inBounds;
+      // inBounds.length === 0: bbox from URL may be tighter than our radius fetch; use all fetched sensors
     }
     let cancelled = false;
     cancelBuildRef.current = () => {
