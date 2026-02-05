@@ -368,7 +368,7 @@ export default function SensorMap({
             type="circle"
             minzoom={0}
             paint={{
-              "circle-radius": 8,
+              "circle-radius": 5,
               "circle-color": [
                 "match",
                 ["get", "sensor_type"],
@@ -382,7 +382,7 @@ export default function SensorMap({
                 "#a855f7",
                 "#64748b",
               ],
-              "circle-stroke-width": 2,
+              "circle-stroke-width": 1.5,
               "circle-stroke-color": "rgba(255,255,255,0.95)",
             }}
           />
@@ -393,9 +393,9 @@ export default function SensorMap({
               type="circle"
               filter={["==", ["get", "id"], selectedSensor.id]}
               paint={{
-                "circle-radius": 10,
+                "circle-radius": 7,
                 "circle-color": "#9ab07f",
-                "circle-stroke-width": 3,
+                "circle-stroke-width": 2,
                 "circle-stroke-color": "#ffffff",
               }}
             />
