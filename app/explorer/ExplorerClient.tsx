@@ -713,7 +713,7 @@ export default function ExplorerClient() {
         }
         const newUrl = `/explorer${params.toString() ? `?${params.toString()}` : ""}`;
         console.log("[ExplorerClient] router.push", newUrl);
-        router.push(newUrl);
+        await router.push(newUrl);
       } finally {
         setIsFindingLocation(false);
         console.log("[ExplorerClient] handleSearchSubmit done");
