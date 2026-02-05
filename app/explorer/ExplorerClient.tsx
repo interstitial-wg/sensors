@@ -135,19 +135,15 @@ export default function ExplorerClient() {
   useEffect(() => {
     if (!hasLocationCoords || locationLat == null || locationLon == null)
       return;
-    const b: Bounds = locationBbox
-      ? {
-          west: locationBbox.min_lon,
-          south: locationBbox.min_lat,
-          east: locationBbox.max_lon,
-          north: locationBbox.max_lat,
-        }
-      : {
-          west: locationLon - 0.03,
-          south: locationLat - 0.03,
-          east: locationLon + 0.03,
-          north: locationLat + 0.03,
-        };
+    // Use geocode center point with fixed pad — avoids bbox center issues (e.g. Pacific)
+    // Pad ~0.04° ≈ 4.4km for city scope
+    const pad = 0.04;
+    const b: Bounds = {
+      west: locationLon - pad,
+      south: locationLat - pad,
+      east: locationLon + pad,
+      north: locationLat + pad,
+    };
     setBounds(normalizeBounds(b));
   }, [hasLocationCoords, locationLat, locationLon, locationBboxKey]);
   const [allSensors, setAllSensors] = useState<Sensor[]>([]);
@@ -518,37 +514,15 @@ export default function ExplorerClient() {
   const fitToLocationBounds = useMemo((): Bounds | null => {
     if (!hasLocationCoords || locationLat == null || locationLon == null)
       return null;
-    if (
-      hasLocationBbox &&
-      locationMinLatParam != null &&
-      locationMaxLatParam != null &&
-      locationMinLonParam != null &&
-      locationMaxLonParam != null
-    ) {
-      return {
-        west: parseFloat(locationMinLonParam),
-        south: parseFloat(locationMinLatParam),
-        east: parseFloat(locationMaxLonParam),
-        north: parseFloat(locationMaxLatParam),
-      };
-    }
-    const pad = 0.05;
+    // Use geocode center with fixed pad for consistent scope
+    const pad = 0.045;
     return {
       west: locationLon - pad,
       south: locationLat - pad,
       east: locationLon + pad,
       north: locationLat + pad,
     };
-  }, [
-    hasLocationCoords,
-    locationLat,
-    locationLon,
-    hasLocationBbox,
-    locationMinLatParam,
-    locationMaxLatParam,
-    locationMinLonParam,
-    locationMaxLonParam,
-  ]);
+  }, [hasLocationCoords, locationLat, locationLon]);
   const sensorsForMap = useMemo(() => {
     if (!fitToLocationBounds) return sensorsToShow;
     const inBounds = filterSensorsByBounds(sensorsToShow, fitToLocationBounds);
@@ -590,37 +564,15 @@ export default function ExplorerClient() {
   const fitToLocation = useMemo((): Bounds | null => {
     if (!hasLocationCoords || locationLat == null || locationLon == null)
       return null;
-    if (
-      hasLocationBbox &&
-      locationMinLatParam != null &&
-      locationMaxLatParam != null &&
-      locationMinLonParam != null &&
-      locationMaxLonParam != null
-    ) {
-      return {
-        west: parseFloat(locationMinLonParam),
-        south: parseFloat(locationMinLatParam),
-        east: parseFloat(locationMaxLonParam),
-        north: parseFloat(locationMaxLatParam),
-      };
-    }
-    const pad = 0.03;
+    // Use geocode center with fixed pad for consistent scope
+    const pad = 0.04;
     return {
       west: locationLon - pad,
       south: locationLat - pad,
       east: locationLon + pad,
       north: locationLat + pad,
     };
-  }, [
-    hasLocationCoords,
-    locationLat,
-    locationLon,
-    hasLocationBbox,
-    locationMinLatParam,
-    locationMaxLatParam,
-    locationMinLonParam,
-    locationMaxLonParam,
-  ]);
+  }, [hasLocationCoords, locationLat, locationLon]);
 
   // Fit map to location when we navigate, then to filtered sensors when they load
   const fitToSensorsBounds = useMemo(
@@ -828,19 +780,12 @@ export default function ExplorerClient() {
           }
           locationBounds={
             hasLocationCoords && locationLat != null && locationLon != null
-              ? hasLocationBbox && locationBbox
-                ? {
-                    west: locationBbox.min_lon,
-                    south: locationBbox.min_lat,
-                    east: locationBbox.max_lon,
-                    north: locationBbox.max_lat,
-                  }
-                : {
-                    west: locationLon - 1,
-                    south: locationLat - 1,
-                    east: locationLon + 1,
-                    north: locationLat + 1,
-                  }
+              ? {
+                  west: locationLon - 0.045,
+                  south: locationLat - 0.045,
+                  east: locationLon + 0.045,
+                  north: locationLat + 0.045,
+                }
               : null
           }
           onInitialSearchConsumed={clearQueryFromUrl}
