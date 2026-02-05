@@ -324,6 +324,7 @@ export default function ExplorerClient() {
     async function fetchAllPages() {
       const accumulated: Sensor[] = [];
       const seenIds = new Set<string>();
+      let finalSensorCount = 0;
       try {
         // Build one bbox task per (type, segment); run with concurrency limit so types load in parallel.
         const bboxTasks: (() => Promise<Sensor[]>)[] = [];
@@ -438,6 +439,7 @@ export default function ExplorerClient() {
         if (sorted.length > SENSORS_PER_VIEWPORT_CAP) {
           sorted = sorted.slice(0, SENSORS_PER_VIEWPORT_CAP);
         }
+        finalSensorCount = sorted.length;
         setAllSensors(sorted);
         setProgressiveVisibleCount(bbox == null ? sorted.length : 0);
         if (cacheKey) {
@@ -780,7 +782,7 @@ export default function ExplorerClient() {
           fitToSensorsBounds={
             hasLocationCoords ? null : fitToSensorsBounds
           }
-          fitToLocationZoom={12}
+          fitToLocationZoom={13}
           focusSensorId={focusSensor?.id ?? null}
         />
       </div>

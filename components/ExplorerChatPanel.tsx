@@ -296,6 +296,9 @@ export default function ExplorerChatPanel({
     if (hasLocationCoords && !locationDataReady) return;
     if (locationKeyMismatch) return;
     if (skipNoTransition) return;
+    // Avoid running with empty sensors when a location search is in flight: wait for fetch to complete.
+    // (When isFindingLocation becomes false, router may not have updated yet; we'd run with stale 0 sensors.)
+    if (pendingSearchRef.current && sensorsRef.current.length === 0) return;
     pendingSearchRef.current = false;
 
     // Cancel any in-flight build before starting a new one
@@ -318,6 +321,7 @@ export default function ExplorerChatPanel({
       }
       // inBounds.length === 0: bbox from URL may be tighter than our radius fetch; use all fetched sensors
     }
+
     let cancelled = false;
     cancelBuildRef.current = () => {
       cancelled = true;
